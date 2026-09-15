@@ -9,7 +9,7 @@ description = "Platform-agnostic toolkit for measuring automation and AI-generat
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
-authors = [{ name = "tomate1tigre", email = "tomate1tigre@gmail.com" }]
+authors = [{ name = "Locotomate21", email = "tomate1tigre@gmail.com" }]
 keywords = ["computational-social-science", "bot-detection", "coordination", "nlp"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -47,9 +47,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tomate1tigre/synthwatch"
-Documentation = "https://github.com/tomate1tigre/synthwatch/tree/main/docs"
-Issues = "https://github.com/tomate1tigre/synthwatch/issues"
+Homepage = "https://github.com/Locotomate21/Synth_Watch"
+Documentation = "https://github.com/Locotomate21/Synth_Watch/tree/main/docs"
+Issues = "https://github.com/Locotomate21/Synth_Watch/issues"
 
 [project.scripts]
 synthwatch = "synthwatch.cli:main"
