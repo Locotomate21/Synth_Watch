@@ -1,0 +1,76 @@
+# synthwatch
+
+Platform-agnostic toolkit for measuring **automation and AI-generated text in
+political conversation**. Academic / portfolio project.
+
+> `synthwatch` estimates *how much* of a conversation looks automated or
+> synthetic, and *which clusters* behave in a coordinated way. It does not
+> decide that a given person is a bot, and it is not built to. See
+> [`ETHICS.md`](ETHICS.md).
+
+## Layers
+
+| Layer | Module | Responsibility |
+| --- | --- | --- |
+| 1 | `synthwatch.ingest` | Adapters (native CSV/JSON, Reddit, Bluesky, Mastodon) normalising into one internal schema |
+| 2 | `synthwatch.detect` | Feature extractors `text`, `account`, `temporal`, `coordination`, plus a calibrated `ensemble` |
+| 3 | `synthwatch.report` | Aggregate metrics, cluster cards, JSON/HTML export |
+
+## Status
+
+Early scaffolding.
+
+- [x] Internal schema (`Account`, `Post`, `LabelRecord`, `Corpus`)
+- [x] Feature declaration contract (`FeatureSpec`, enforced by tests)
+- [x] Adapter contract (`Adapter`, `IngestReport`)
+- [x] `detect.coordination` — SimHash near-duplicates, banded candidate
+      generation, Louvain communities, permutation null model, seven
+      account-level features
+- [ ] `detect.text` / `detect.account` / `detect.temporal`
+- [ ] `detect.ensemble`
+- [ ] `report`
+- [ ] ingest adapters (native CSV/JSON, Reddit, Bluesky, Mastodon)
+
+## Coordination analysis at a glance
+
+```python
+from synthwatch.detect.coordination import CoordinationConfig, detect_coordination
+
+result = detect_coordination(
+    corpus,
+    CoordinationConfig(window=timedelta(minutes=15), min_edge_weight=2),
+    null_model_permutations=100,
+)
+result.as_dict()["clusters"]     # cluster cards, never per-account verdicts
+result.as_dict()["null_model"]   # observed edges vs. time-randomised corpora
+```
+
+Two things the module insists on: the parameters that produced a result travel
+with it (`config` is part of every export), and the cluster count is compared
+against what the same corpus produces by chance before it is reported.
+`window_sensitivity()` re-runs the analysis across several windows, because a
+cluster that only exists at one window is not a finding.
+
+## Development
+
+```bash
+uv sync --extra dev          # or: pip install -e ".[dev]"
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
+uv run mypy
+```
+
+Python 3.11+. Core dependencies stay light (pydantic, pandas, numpy,
+networkx). The language model behind perplexity and burstiness lives in the
+`text` extra, so ingest, account, temporal and coordination analysis all run
+without a GPU or a model download.
+
+## Documentation
+
+- [`docs/schema.md`](docs/schema.md) — the internal schema and the decisions behind it
+- [`docs/features.md`](docs/features.md) — every feature with its rationale and its known limitation
+- [`ETHICS.md`](ETHICS.md) — scope, refusals, and how results should be read
+
+## License
+
+MIT.

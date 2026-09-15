@@ -1,0 +1,112 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "synthwatch"
+version = "0.1.0.dev0"
+description = "Platform-agnostic toolkit for measuring automation and AI-generated text in political conversation"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "tomate1tigre", email = "tomate1tigre@gmail.com" }]
+keywords = ["computational-social-science", "bot-detection", "coordination", "nlp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+
+# Core stays deliberately light: ingest + account/temporal/coordination features
+# run without a GPU, a model download, or a browser.
+dependencies = [
+    "pydantic>=2.7",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "networkx>=3.3",
+]
+
+[project.optional-dependencies]
+# Perplexity/burstiness need a small causal LM; kept optional on purpose.
+text = ["transformers>=4.44", "torch>=2.3"]
+ensemble = ["scikit-learn>=1.5", "shap>=0.46"]
+report = ["jinja2>=3.1"]
+all = ["synthwatch[text,ensemble,report]"]
+dev = [
+    "synthwatch[all]",
+    "pytest>=8.2",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.100",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pandas-stubs",
+    "types-networkx",
+]
+
+[project.urls]
+Homepage = "https://github.com/tomate1tigre/synthwatch"
+Documentation = "https://github.com/tomate1tigre/synthwatch/tree/main/docs"
+Issues = "https://github.com/tomate1tigre/synthwatch/issues"
+
+[project.scripts]
+synthwatch = "synthwatch.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/synthwatch"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtins shadowing
+    "C4",        # comprehensions
+    "DTZ",       # naive datetimes -- load-bearing for temporal features
+    "PT",        # pytest style
+    "RET", "SIM", "PTH", "ARG", "PL", "RUF",
+    "D",         # pydocstyle: every feature must carry its own documentation
+    "ANN",       # explicit annotations
+]
+ignore = ["D107", "D203", "D213", "PLR0913"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "ANN", "PLR2004", "ARG"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+disallow_any_explicit = false   # `extra: dict[str, Any]` is the raw-payload escape hatch
+
+[[tool.mypy.overrides]]
+module = ["shap.*", "sklearn.*", "transformers.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "slow: needs a model download or a large fixture",
+    "network: hits a live API (skipped by default in CI)",
+]
+
+[tool.coverage.run]
+source = ["src/synthwatch"]
+branch = true

@@ -1,0 +1,4 @@
+# Keep LF in the repository regardless of the platform checking out.
+* text=auto eol=lf
+*.png binary
+*.parquet binary
