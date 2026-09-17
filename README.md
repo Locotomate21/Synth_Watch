@@ -29,7 +29,10 @@ Early scaffolding.
 - [x] `ingest.native` — CSV, TSV, JSON and JSONL in the internal schema, with
       column aliases for the usual archive exports, a corpus cache writer, and
       a load report that counts every dropped row and why
-- [ ] `detect.text` / `detect.account` / `detect.temporal`
+- [x] `detect.temporal` — circadian shape, quiet-window share, inter-arrival
+      entropy, self-relative burst detection; every feature invariant to the
+      account's timezone
+- [ ] `detect.text` / `detect.account`
 - [ ] `detect.ensemble`
 - [ ] `report`
 - [ ] ingest adapters for Reddit, Bluesky and Mastodon
@@ -41,7 +44,7 @@ from pathlib import Path
 from synthwatch.ingest import NativeAdapter
 
 result = NativeAdapter().load_tables(Path("posts.csv"), Path("accounts.csv"))
-result.report.as_dict()   # rows read, rows skipped, and the reason for each
+result.report.as_dict()  # rows read, rows skipped, and the reason for each
 corpus = result.corpus
 ```
 
@@ -54,6 +57,18 @@ A timestamp without a UTC offset is **refused**, not assumed to be UTC — pass
 `assume_timezone=` to state what the file actually contains. Guessing here
 rotates every circadian and inter-arrival feature downstream, and the wrong
 answer looks exactly as plausible as the right one.
+
+## Timezones, and why the temporal features do not need them
+
+A corpus almost never says which timezone an account lives in, so
+`detect.temporal` is built so that no feature can depend on it. Instead of
+asking whether an account posts at 3am local time, it asks how concentrated
+posting is across the 24 hours whatever they are called, and how much the
+account posts during *its own* quietest six-hour stretch. Rotating a whole
+timeline leaves both unchanged — a property the test suite checks directly.
+The exception, documented in the module: half-hour offsets such as India's
+move posts across hour boundaries instead of rotating them, so there the
+invariance is approximate rather than exact.
 
 ## Coordination analysis at a glance
 

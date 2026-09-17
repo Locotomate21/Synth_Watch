@@ -7,6 +7,62 @@ Every feature declares why it should carry signal and who it misclassifies
 while behaving perfectly normally. The second half is the one that has to
 reach the reader of a report.
 
+## `temp_circadian_entropy`
+
+Evenness of posting across the 24 hours of the day.
+
+- **Level**: account · **Unit**: bits_normalised · **Direction**: higher = more anomalous
+- **Rationale**: People are awake on a schedule and their posting inherits the shape of it. A process that runs continuously spreads evenly across all 24 hours, which pushes this towards its maximum. The measure is invariant to timezone.
+- **Known limitation**: Shift workers, insomniacs and accounts shared across several timezones all flatten the same way, and any account with few posts looks flat by accident.
+
+## `temp_quiet_hours_share`
+
+Share of posts inside the account's own quietest six-hour window.
+
+- **Level**: account · **Unit**: ratio · **Direction**: higher = more anomalous
+- **Rationale**: Everyone sleeps somewhere, so a human timeline has a stretch that is nearly empty wherever their night happens to fall. Finding the quietest window per account rather than assuming a local night keeps this usable without knowing anyone's timezone.
+- **Known limitation**: An account operated in shifts by several people, or one that mostly reshares automatically while its owner sleeps, has no quiet window and is not covert.
+
+## `temp_interarrival_entropy`
+
+Entropy of the log-binned gaps between consecutive posts.
+
+- **Level**: account · **Unit**: bits_normalised · **Direction**: lower = more anomalous
+- **Rationale**: Human attention is lumpy: minutes of replies, then hours of nothing, spread over many orders of magnitude. A fixed cadence collapses every gap into one bucket, and the entropy falls towards zero.
+- **Known limitation**: Any scheduling tool produces the same collapse, and an account that posts only a few times leaves too few gaps to estimate a distribution from.
+
+## `temp_median_interarrival_seconds`
+
+Median time between consecutive posts.
+
+- **Level**: account · **Unit**: seconds · **Direction**: lower = more anomalous
+- **Rationale**: Sustained short gaps put an account outside what a person maintains by hand over a long collection window, especially combined with a flat circadian shape and an absent quiet window.
+- **Known limitation**: Confounded with volume and with topic: live-posting an election night or a football match produces minutes-long medians from an entirely human account.
+
+## `temp_burst_share`
+
+Share of posts arriving inside a burst, relative to the account's baseline.
+
+- **Level**: account · **Unit**: ratio · **Direction**: higher = more anomalous
+- **Rationale**: Queued or triggered publishing tends to discharge in clumps far faster than the account's own median rhythm, rather than arriving at the irregular pace of someone typing.
+- **Known limitation**: Thread writing, live commentary and catching up after a flight all look like bursts, and the threshold is relative, so a quiet account bursts more easily.
+
+## `temp_max_burst_size`
+
+Number of posts in the account's largest burst.
+
+- **Level**: account · **Unit**: count · **Direction**: higher = more anomalous
+- **Rationale**: Distinguishes an account that occasionally posts twice in a row from one that empties a queue of dozens of items in a few minutes.
+- **Known limitation**: A long thread published in one sitting is a single large burst and is completely ordinary human behaviour on most platforms.
+
+## `temp_active_days_ratio`
+
+Share of days in the observed span on which the account posted.
+
+- **Level**: account · **Unit**: ratio · **Direction**: higher = more anomalous
+- **Rationale**: People take days off: they travel, get busy, lose interest for a week. A process that never misses a day over a long span is behaving unlike its audience even when its daily volume is modest.
+- **Known limitation**: Professional accounts -- newsrooms, institutions, anyone whose job is to post -- reach 1.0 legitimately, and a short collection window reaches it by accident.
+
 ## `coord_partner_count`
 
 Number of distinct accounts this account co-published near-duplicates with.
