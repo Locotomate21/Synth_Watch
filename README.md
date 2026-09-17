@@ -26,10 +26,34 @@ Early scaffolding.
 - [x] `detect.coordination` — SimHash near-duplicates, banded candidate
       generation, Louvain communities, permutation null model, seven
       account-level features
+- [x] `ingest.native` — CSV, TSV, JSON and JSONL in the internal schema, with
+      column aliases for the usual archive exports, a corpus cache writer, and
+      a load report that counts every dropped row and why
 - [ ] `detect.text` / `detect.account` / `detect.temporal`
 - [ ] `detect.ensemble`
 - [ ] `report`
-- [ ] ingest adapters (native CSV/JSON, Reddit, Bluesky, Mastodon)
+- [ ] ingest adapters for Reddit, Bluesky and Mastodon
+
+## Loading data
+
+```python
+from pathlib import Path
+from synthwatch.ingest import NativeAdapter
+
+result = NativeAdapter().load_tables(Path("posts.csv"), Path("accounts.csv"))
+result.report.as_dict()   # rows read, rows skipped, and the reason for each
+corpus = result.corpus
+```
+
+Column names from the Twitter Information Operations Archive and Pushshift-style
+dumps are recognised out of the box; anything else maps through
+`post_aliases=` / `account_aliases=`. Columns the schema has no field for are
+kept in `extra` rather than dropped.
+
+A timestamp without a UTC offset is **refused**, not assumed to be UTC — pass
+`assume_timezone=` to state what the file actually contains. Guessing here
+rotates every circadian and inter-arrival feature downstream, and the wrong
+answer looks exactly as plausible as the right one.
 
 ## Coordination analysis at a glance
 
@@ -41,8 +65,8 @@ result = detect_coordination(
     CoordinationConfig(window=timedelta(minutes=15), min_edge_weight=2),
     null_model_permutations=100,
 )
-result.as_dict()["clusters"]     # cluster cards, never per-account verdicts
-result.as_dict()["null_model"]   # observed edges vs. time-randomised corpora
+result.as_dict()["clusters"]  # cluster cards, never per-account verdicts
+result.as_dict()["null_model"]  # observed edges vs. time-randomised corpora
 ```
 
 Two things the module insists on: the parameters that produced a result travel

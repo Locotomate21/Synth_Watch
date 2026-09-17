@@ -65,8 +65,13 @@ class Adapter(Protocol):
         """Whether this adapter recognises ``path`` (cheap check, no full read)."""
         ...
 
-    def load(self, path: Path, **options: object) -> LoadResult:
+    def load(self, path: Path) -> LoadResult:
         """Read ``path`` into a corpus.
+
+        Per-source options -- column aliases, an assumed timezone, the platform
+        to stamp on records -- are constructor arguments of the concrete
+        adapter, not arguments here. That keeps the options that shaped a load
+        attached to the object that performed it, so a report can record them.
 
         Implementations must not perform network calls: fetching is a separate
         concern from parsing, so that every analysis can be re-run offline from

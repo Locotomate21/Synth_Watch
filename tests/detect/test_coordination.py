@@ -13,6 +13,7 @@ import subprocess
 import sys
 from datetime import timedelta
 from itertools import combinations
+from typing import cast
 
 import pytest
 
@@ -267,9 +268,11 @@ class TestClusters:
 
     def test_export_carries_the_caveat(self):
         exported = detect_coordination(coordinated_corpus()).as_dict()
+        config = cast("dict[str, object]", exported["config"])
+        clusters = cast("list[dict[str, object]]", exported["clusters"])
         assert "behaviour, not an" in str(exported["caveat"])
-        assert exported["config"]["window_seconds"] == 900.0
-        assert exported["clusters"][0]["size"] == 4
+        assert config["window_seconds"] == 900.0
+        assert clusters[0]["size"] == 4
 
     def test_summary_of_clusters(self):
         clusters = detect_coordination(coordinated_corpus()).clusters
@@ -329,7 +332,8 @@ class TestNullModel:
     def test_detect_can_run_the_test_inline(self):
         result = detect_coordination(coordinated_corpus(), null_model_permutations=10)
         assert result.null_model is not None
-        assert result.as_dict()["null_model"]["strategy"] == "shift"
+        null_model = cast("dict[str, object]", result.as_dict()["null_model"])
+        assert null_model["strategy"] == "shift"
 
     def test_null_model_is_skipped_by_default(self):
         assert detect_coordination(organic_corpus()).null_model is None

@@ -44,11 +44,11 @@ class TestRecords:
     def test_records_are_frozen(self):
         post = make_post("p1", "a1")
         with pytest.raises(ValidationError):
-            post.text = "edited"
+            post.text = "edited"  # type: ignore[misc]
 
     def test_unknown_fields_are_refused_not_swallowed(self):
         with pytest.raises(ValidationError):
-            Account(account_id="a1", platform=Platform.GENERIC, follower_count=3)
+            Account(account_id="a1", platform=Platform.GENERIC, follower_count=3)  # type: ignore[call-arg]
 
     def test_unmapped_payload_survives_in_extra(self):
         account = make_account("a1", extra={"karma": 42})

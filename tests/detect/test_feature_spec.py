@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -17,7 +19,7 @@ from synthwatch.models import build_corpus
 from synthwatch.types import FeatureLevel
 from tests.conftest import make_account, make_post
 
-VALID = {
+VALID: dict[str, Any] = {
     "name": "coord_max_cosim",
     "description": "Highest content similarity with any other account in the window.",
     "rationale": (
@@ -51,7 +53,7 @@ def test_registry_rejects_duplicate_feature_names():
     class Fake:
         def __init__(self, name: str) -> None:
             self.name = name
-            self.specs = (FeatureSpec(**VALID),)
+            self.specs: Sequence[FeatureSpec] = (FeatureSpec(**VALID),)
 
         def extract(self, corpus):  # pragma: no cover - protocol filler
             raise NotImplementedError

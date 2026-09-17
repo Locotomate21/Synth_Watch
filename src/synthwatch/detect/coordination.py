@@ -376,7 +376,7 @@ def _accumulate_pairs(
 class _Analysis:
     """Everything one pass over the corpus produces, computed once."""
 
-    graph: nx.Graph
+    graph: nx.Graph[AccountId]
     stats: dict[str, object]
     matched: frozenset[PostId]
     records: tuple[_Fingerprint, ...]
@@ -387,7 +387,7 @@ def _analyse(corpus: Corpus, config: CoordinationConfig) -> _Analysis:
     records = _fingerprints(corpus, config)
     evidence, matched, comparisons = _accumulate_pairs(records, config)
 
-    graph = nx.Graph()
+    graph: nx.Graph[AccountId] = nx.Graph()
     graph.add_nodes_from(sorted({record.account_id for record in records}))
     for (left, right), entry in evidence.items():
         weight = len(entry.similarities)
@@ -416,7 +416,7 @@ def _analyse(corpus: Corpus, config: CoordinationConfig) -> _Analysis:
 
 def build_graph(
     corpus: Corpus, config: CoordinationConfig | None = None
-) -> tuple[nx.Graph, dict[str, object]]:
+) -> tuple[nx.Graph[AccountId], dict[str, object]]:
     """Build the weighted co-posting graph for ``corpus``.
 
     Nodes are account ids; an edge carries ``weight`` (number of co-published
@@ -493,7 +493,7 @@ class NullModelResult:
 class CoordinationResult:
     """Everything the coordination analysis produced, plus how it was produced."""
 
-    graph: nx.Graph
+    graph: nx.Graph[AccountId]
     clusters: tuple[Cluster, ...]
     config: CoordinationConfig
     stats: Mapping[str, object]
@@ -523,7 +523,9 @@ class CoordinationResult:
         }
 
 
-def _clusters_from_graph(graph: nx.Graph, config: CoordinationConfig) -> tuple[Cluster, ...]:
+def _clusters_from_graph(
+    graph: nx.Graph[AccountId], config: CoordinationConfig
+) -> tuple[Cluster, ...]:
     """Run Louvain and summarise the communities worth reporting."""
     if graph.number_of_edges() == 0:
         return ()

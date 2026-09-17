@@ -39,7 +39,7 @@ def make_account(
         followers_count=followers,
         following_count=following,
         collected_at=EPOCH,
-        **overrides,  # type: ignore[arg-type]
+        **overrides,
     )
 
 
@@ -62,7 +62,7 @@ def make_post(
         text=text,
         kind=kind,
         collected_at=EPOCH,
-        **overrides,  # type: ignore[arg-type]
+        **overrides,
     )
 
 

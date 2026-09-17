@@ -36,7 +36,10 @@ ensemble = ["scikit-learn>=1.5", "shap>=0.46"]
 report = ["jinja2>=3.1"]
 all = ["synthwatch[text,ensemble,report]"]
 dev = [
-    "synthwatch[all]",
+    # Deliberately not `synthwatch[all]`: the `text` extra drags in torch, which
+    # would add hundreds of megabytes to every CI run for the sake of one module.
+    # Install it explicitly when working on `detect.text`.
+    "synthwatch[ensemble,report]",
     "pytest>=8.2",
     "pytest-cov>=5.0",
     "hypothesis>=6.100",
@@ -97,6 +100,13 @@ disallow_any_explicit = false   # `extra: dict[str, Any]` is the raw-payload esc
 [[tool.mypy.overrides]]
 module = ["shap.*", "sklearn.*", "transformers.*"]
 ignore_missing_imports = true
+
+# Tests are type-checked, but a `-> None` on every test function is noise that
+# catches nothing. Everything else stays strict here, including the fixtures.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"
