@@ -10,6 +10,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Only first-party actions are used here. uv is the recommended way to work on
+# this project locally, but a third-party action is one more thing that can
+# break the build for reasons that have nothing to do with the code; pip reads
+# the same PEP 621 metadata.
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -20,23 +24,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          enable-cache: true
+          cache: pip
 
       - name: Install the project
-        run: uv sync --extra dev
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
 
       - name: Lint
-        run: uv run ruff check --output-format=github .
+        run: ruff check --output-format=github .
 
       - name: Format
-        run: uv run ruff format --check .
+        run: ruff format --check .
 
       - name: Types
-        run: uv run mypy
+        run: mypy
 
       - name: Tests
-        run: uv run pytest -m "not network" --cov --cov-report=term-missing
+        run: pytest -m "not network" --cov --cov-report=term-missing
