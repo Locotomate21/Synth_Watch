@@ -59,6 +59,7 @@ from statistics import median
 import pandas as pd
 
 from synthwatch.detect.base import FeatureSpec, empty_frame
+from synthwatch.detect.stats import shannon_entropy
 from synthwatch.models import Corpus, Post
 from synthwatch.types import AccountId, FeatureLevel
 
@@ -71,6 +72,7 @@ __all__ = [
     "interarrival_entropy",
     "profile_accounts",
     "quiet_hours_share",
+    "shannon_entropy",
 ]
 
 HOURS_PER_DAY = 24
@@ -87,31 +89,6 @@ inter-post gap without letting one enormous gap dominate the distribution."""
 # --------------------------------------------------------------------------
 # Primitives
 # --------------------------------------------------------------------------
-
-
-def shannon_entropy(counts: Sequence[int | float], *, bins: int | None = None) -> float:
-    """Normalised Shannon entropy of a histogram, in ``[0, 1]``.
-
-    Args:
-        counts: Bin counts. Empty bins are fine and carry no information.
-        bins: Denominator for normalisation, defaulting to ``len(counts)``.
-            Pass it explicitly when the histogram is sparse but the number of
-            possible bins is known, so two accounts stay comparable.
-
-    Returns:
-        ``0.0`` for everything in one bin, ``1.0`` for a perfectly flat
-        distribution, and ``0.0`` when there is nothing to measure.
-    """
-    total = float(sum(counts))
-    if total <= 0:
-        return 0.0
-    width = bins if bins is not None else len(counts)
-    if width <= 1:
-        return 0.0
-    entropy = -sum((c / total) * math.log2(c / total) for c in counts if c > 0)
-    # A single populated bin yields -0.0, and `max(-0.0, 0.0)` keeps the sign.
-    # abs() is safe because entropy is non-negative by construction.
-    return abs(entropy) / math.log2(width)
 
 
 def hour_histogram(times: Sequence[datetime]) -> list[int]:

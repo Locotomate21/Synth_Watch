@@ -7,6 +7,70 @@ Every feature declares why it should carry signal and who it misclassifies
 while behaving perfectly normally. The second half is the one that has to
 reach the reader of a report.
 
+## `acct_age_days`
+
+Account age in days at the corpus collection time.
+
+- **Level**: account · **Unit**: days · **Direction**: lower = more anomalous
+- **Rationale**: Accounts created for a specific campaign cluster in age around the event they were created for, and a cohort of accounts that all appeared in the same fortnight is a stronger signal than any single young account.
+- **Known limitation**: Every platform has a constant inflow of genuine newcomers, and anyone with a budget buys aged accounts precisely to defeat this. Young means young.
+
+## `acct_handle_digit_ratio`
+
+Share of the handle made up of digits.
+
+- **Level**: account · **Unit**: ratio · **Direction**: higher = more anomalous
+- **Rationale**: Bulk-registered accounts take whatever name the platform suggests, which is a desired name plus enough digits to make it unique. Registering by hand, people usually keep trying until they find something they like.
+- **Known limitation**: Birth years, jersey numbers and area codes are ordinary in handles, and in several languages a numeric suffix is a normal naming convention.
+
+## `acct_handle_trailing_digits`
+
+Length of the run of digits at the end of the handle.
+
+- **Level**: account · **Unit**: count · **Direction**: higher = more anomalous
+- **Rationale**: A long trailing digit run is specifically the shape of an auto-suggested name, which distinguishes it from a birth year or a meaningful number embedded inside a handle.
+- **Known limitation**: Four trailing digits are just as likely to be a year of birth, which makes the low end of this feature almost uninformative on its own.
+
+## `acct_handle_entropy`
+
+Normalised character entropy of the handle.
+
+- **Level**: account · **Unit**: bits_normalised · **Direction**: higher = more anomalous
+- **Rationale**: Handles drawn from a random generator spread evenly across their character set, while names chosen by people reuse letters and follow the statistics of a language.
+- **Known limitation**: Short handles score high mechanically, transliterated names look random to a measure built around the Latin alphabet, and the feature says nothing at all about accounts whose handle the source did not record.
+
+## `acct_followback_ratio`
+
+Followers as a share of followers plus following.
+
+- **Level**: account · **Unit**: ratio · **Direction**: lower = more anomalous
+- **Rationale**: Accounts built to amplify follow aggressively and are followed back rarely, so they sit low on this scale. Expressing it as a share rather than a raw ratio keeps accounts with zero followers from producing infinities.
+- **Known limitation**: Follow-back norms differ enormously between platforms, so the same value means different things across corpora; new genuine accounts also start low.
+
+## `acct_profile_completeness`
+
+Share of optional profile fields that were filled in.
+
+- **Level**: account · **Unit**: ratio · **Direction**: lower = more anomalous
+- **Rationale**: Setting up a profile costs attention that scales badly across hundreds of accounts, so bulk-created accounts tend to leave the optional fields empty.
+- **Known limitation**: Plenty of careful, private people never write a bio, and a well-funded operation fills every field precisely because this is a known check.
+
+## `acct_posts_per_day`
+
+Lifetime posts reported by the profile, divided by account age.
+
+- **Level**: account · **Unit**: posts_per_day · **Direction**: higher = more anomalous
+- **Rationale**: Sustained volume over the whole life of an account is hard to keep up by hand, and unlike the corpus-derived rate it is not limited to whatever slice of activity happened to be collected.
+- **Known limitation**: It is a lifetime average, so a dormant account that was briefly frantic looks moderate, and a deleted backlog makes an active account look quiet.
+
+## `acct_dormancy_days`
+
+Days between account creation and its first post in the corpus.
+
+- **Level**: account · **Unit**: days · **Direction**: higher = more anomalous
+- **Rationale**: Accounts registered long before they are used, then activated together, are the signature of an aged inventory. The gap is visible even when the age itself looks unremarkable.
+- **Known limitation**: Only the *observed* first post is available, so an account that posted for years before the collection window looks dormant when it simply was not collected. It is meaningful only for corpora that reach back far enough.
+
 ## `temp_circadian_entropy`
 
 Evenness of posting across the 24 hours of the day.

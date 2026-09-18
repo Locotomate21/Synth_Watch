@@ -24,23 +24,28 @@ def make_account(
     *,
     platform: Platform = Platform.GENERIC,
     created_days_ago: float = 900.0,
-    followers: int = 340,
-    following: int = 280,
-    handle: str | None = None,
+    followers: int | None = 340,
+    following: int | None = 280,
     **overrides: object,
 ) -> Account:
-    """Build a synthetic account with plausible, unremarkable defaults."""
-    return Account(
-        account_id=account_id,
-        platform=platform,
-        handle=handle if handle is not None else f"user_{account_id}",
-        display_name=f"Test Account {account_id}",
-        created_at=EPOCH - timedelta(days=created_days_ago),
-        followers_count=followers,
-        following_count=following,
-        collected_at=EPOCH,
-        **overrides,
-    )
+    """Build a synthetic account with plausible, unremarkable defaults.
+
+    Any field can be overridden, including back to ``None``: the defaults are a
+    dict the caller updates rather than fixed keyword arguments, so
+    ``make_account("a1", handle=None)`` builds an account with no handle instead
+    of raising a duplicate-argument error.
+    """
+    defaults: dict[str, object] = {
+        "account_id": account_id,
+        "platform": platform,
+        "handle": f"user_{account_id}",
+        "display_name": f"Test Account {account_id}",
+        "created_at": EPOCH - timedelta(days=created_days_ago),
+        "followers_count": followers,
+        "following_count": following,
+        "collected_at": EPOCH,
+    }
+    return Account(**{**defaults, **overrides})
 
 
 def make_post(
@@ -54,16 +59,16 @@ def make_post(
     **overrides: object,
 ) -> Post:
     """Build a synthetic post ``offset_minutes`` after :data:`EPOCH`."""
-    return Post(
-        post_id=post_id,
-        account_id=account_id,
-        platform=platform,
-        created_at=EPOCH + timedelta(minutes=offset_minutes),
-        text=text,
-        kind=kind,
-        collected_at=EPOCH,
-        **overrides,
-    )
+    defaults: dict[str, object] = {
+        "post_id": post_id,
+        "account_id": account_id,
+        "platform": platform,
+        "created_at": EPOCH + timedelta(minutes=offset_minutes),
+        "text": text,
+        "kind": kind,
+        "collected_at": EPOCH,
+    }
+    return Post(**{**defaults, **overrides})
 
 
 def make_corpus(posts: Sequence[Post], *, source: str = "synthetic") -> Corpus:

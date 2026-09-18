@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from synthwatch.detect.account import AccountExtractor
 from synthwatch.detect.base import FeatureRegistry, render_catalogue
 from synthwatch.detect.coordination import CoordinationExtractor
 from synthwatch.detect.temporal import TemporalExtractor
 
-EXTRACTORS = [TemporalExtractor(), CoordinationExtractor()]
+EXTRACTORS = [AccountExtractor(), TemporalExtractor(), CoordinationExtractor()]
 """Every extractor in the pipeline. Add new ones here as they land."""
 
 OUTPUT = Path(__file__).resolve().parents[1] / "docs" / "features.md"

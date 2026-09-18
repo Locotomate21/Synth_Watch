@@ -90,7 +90,10 @@ ignore = ["D107", "D203", "D213", "PLR0913"]
 convention = "google"
 
 [tool.mypy]
-python_version = "3.11"
+# No `python_version` pin on purpose. Pinning it applies the target version to
+# third-party stubs too, and current numpy stubs use PEP 695 syntax that mypy
+# refuses to parse under an older target. The CI matrix runs mypy on every
+# supported version instead, which checks what the pin was meant to check.
 strict = true
 files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
