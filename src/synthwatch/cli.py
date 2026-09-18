@@ -1,0 +1,202 @@
+"""Command line entry point.
+
+One command does the whole pipeline -- load, analyse, report -- because the
+alternative is a README full of Python snippets that drift from the code. The
+flags are the decisions that change results, and every one of them is written
+into the report that comes out.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from datetime import timedelta
+from pathlib import Path
+
+from synthwatch import __version__
+from synthwatch.detect.account import AccountExtractor
+from synthwatch.detect.base import FeatureRegistry, render_catalogue
+from synthwatch.detect.coordination import CoordinationConfig, CoordinationExtractor
+from synthwatch.detect.temporal import TemporalConfig, TemporalExtractor
+from synthwatch.ingest.native import NativeAdapter, timezone_of
+from synthwatch.report.html import to_html
+from synthwatch.report.report import build_report, to_json
+from synthwatch.types import Platform
+
+__all__ = ["main"]
+
+
+def _parser() -> argparse.ArgumentParser:
+    """Build the argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="synthwatch",
+        description=(
+            "Measure automation and coordination in political conversation. "
+            "Outputs describe corpora and clusters, never individual accounts."
+        ),
+    )
+    parser.add_argument("--version", action="version", version=f"synthwatch {__version__}")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+
+    analyse = subcommands.add_parser(
+        "analyse", help="load a corpus, run the analysis, write a report"
+    )
+    analyse.add_argument("posts", type=Path, help="posts file (.csv, .tsv, .json, .jsonl)")
+    analyse.add_argument("--accounts", type=Path, help="account metadata file")
+    analyse.add_argument("--html", type=Path, help="write an HTML report here")
+    analyse.add_argument("--json", type=Path, help="write a JSON report here")
+    analyse.add_argument(
+        "--features",
+        type=Path,
+        help=(
+            "write the per-account feature matrix here. This file holds "
+            "account-level values and is not a report; it stays with the analyst."
+        ),
+    )
+    analyse.add_argument(
+        "--platform",
+        choices=[p.value for p in Platform],
+        default=Platform.GENERIC.value,
+        help="platform to stamp on records that do not declare one",
+    )
+    analyse.add_argument(
+        "--assume-timezone",
+        type=float,
+        metavar="HOURS",
+        help=(
+            "UTC offset to attach to naive timestamps. Without it, rows with no "
+            "offset are skipped and counted rather than guessed at."
+        ),
+    )
+    analyse.add_argument(
+        "--window",
+        type=float,
+        default=15.0,
+        metavar="MINUTES",
+        help="co-posting window (default: 15). The single most consequential setting.",
+    )
+    analyse.add_argument(
+        "--min-edge-weight",
+        type=int,
+        default=2,
+        help="co-posts required before two accounts get an edge (default: 2)",
+    )
+    analyse.add_argument(
+        "--permutations",
+        type=int,
+        default=0,
+        help=(
+            "null model permutations (default: 0, which skips it). Use at least "
+            "50 for anything you intend to cite."
+        ),
+    )
+    analyse.add_argument(
+        "--min-posts",
+        type=int,
+        default=20,
+        help="posts required before temporal features are reported (default: 20)",
+    )
+    analyse.add_argument(
+        "--no-pseudonyms",
+        action="store_true",
+        help="list real account identifiers in the report instead of pseudonyms",
+    )
+    analyse.add_argument("--salt", help="fixed pseudonym salt, for comparable reports")
+    analyse.add_argument(
+        "--no-examples",
+        action="store_true",
+        help=(
+            "omit the post ids cited as evidence behind each cluster. They are "
+            "real by design -- they are what an analyst verifies against -- so "
+            "withhold them when the report travels further than the corpus does."
+        ),
+    )
+    analyse.add_argument("--title", default="SynthWatch analysis", help="report title")
+    analyse.add_argument("--strict", action="store_true", help="fail on the first bad row")
+
+    docs = subcommands.add_parser("docs", help="regenerate the feature catalogue")
+    docs.add_argument("--out", type=Path, default=Path("docs/features.md"))
+    return parser
+
+
+def _analyse(args: argparse.Namespace) -> int:
+    """Run the pipeline and write whatever outputs were asked for."""
+    adapter = NativeAdapter(
+        platform=Platform(args.platform),
+        assume_timezone=timezone_of(args.assume_timezone)
+        if args.assume_timezone is not None
+        else None,
+        strict=args.strict,
+    )
+    loaded = (
+        adapter.load_tables(args.posts, args.accounts)
+        if args.accounts
+        else adapter.load(args.posts)
+    )
+    report, features = build_report(
+        loaded.corpus,
+        coordination_config=CoordinationConfig(
+            window=timedelta(minutes=args.window), min_edge_weight=args.min_edge_weight
+        ),
+        temporal_config=TemporalConfig(min_posts=args.min_posts),
+        ingest_report=loaded.report,
+        null_model_permutations=args.permutations,
+        pseudonymise=not args.no_pseudonyms,
+        pseudonym_salt=args.salt,
+        include_examples=not args.no_examples,
+        title=args.title,
+    )
+
+    written: list[str] = []
+    if args.json:
+        to_json(report, args.json)
+        written.append(str(args.json))
+    if args.html:
+        to_html(report, args.html)
+        written.append(str(args.html))
+    if args.features:
+        features.to_csv(args.features)
+        written.append(str(args.features))
+
+    report_summary = loaded.report
+    print(
+        f"loaded {report_summary.n_posts} posts from {report_summary.n_accounts} accounts"
+        f" ({report_summary.n_skipped} rows skipped)"
+    )
+    for warning in report_summary.warnings:
+        print(f"  warning: {warning}", file=sys.stderr)
+    print(f"found {len(report.cards)} cluster(s) worth reporting")
+    if args.permutations == 0 and report.cards:
+        print(
+            "  note: no null model was run, so that count has nothing to be "
+            "compared against (--permutations 50)",
+            file=sys.stderr,
+        )
+    for destination in written:
+        print(f"wrote {destination}")
+    if not written:
+        print("no output written; pass --html, --json or --features", file=sys.stderr)
+    return 0
+
+
+def _docs(args: argparse.Namespace) -> int:
+    """Regenerate the feature catalogue from the declared specs."""
+    registry = FeatureRegistry.from_extractors(
+        [AccountExtractor(), TemporalExtractor(), CoordinationExtractor()]
+    )
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(render_catalogue(registry), encoding="utf-8")
+    print(f"wrote {args.out} ({len(registry.specs)} features)")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the command line interface."""
+    args = _parser().parse_args(argv)
+    if args.command == "analyse":
+        return _analyse(args)
+    return _docs(args)
+
+
+if __name__ == "__main__":  # pragma: no cover - module entry point
+    raise SystemExit(main())

@@ -18,7 +18,9 @@ political conversation**. Academic / portfolio project.
 
 ## Status
 
-Early scaffolding.
+Runs end to end on unlabelled data: load a corpus, get a report. The supervised
+half — a calibrated ensemble over all four feature families — is waiting on
+labelled training data.
 
 - [x] Internal schema (`Account`, `Post`, `LabelRecord`, `Corpus`)
 - [x] Feature declaration contract (`FeatureSpec`, enforced by tests)
@@ -32,10 +34,38 @@ Early scaffolding.
 - [x] `detect.temporal` — circadian shape, quiet-window share, inter-arrival
       entropy, self-relative burst detection; every feature invariant to the
       account's timezone
-- [ ] `detect.text` / `detect.account`
-- [ ] `detect.ensemble`
-- [ ] `report`
+- [x] `detect.account` — age, handle shape, network ratios, profile
+      completeness, posting rate, dormancy before the first observed post
+- [x] `report` + CLI — feature distributions with their coverage, pseudonymised
+      cluster cards, self-contained HTML and JSON export
+- [ ] `detect.text` (needs the `text` extra: transformers + torch)
+- [ ] `detect.ensemble` (blocked on labelled training data)
 - [ ] ingest adapters for Reddit, Bluesky and Mastodon
+
+## Running it
+
+```bash
+synthwatch analyse posts.csv --accounts accounts.csv \
+    --html report.html --json report.json --permutations 50
+```
+
+Out comes a single self-contained HTML file: no external stylesheet, no script,
+no network request when it is opened. It leads with its own caveats, reports
+each feature's distribution next to that feature's known limitation and its
+coverage, and describes clusters rather than accounts.
+
+Three things the report layer enforces rather than merely documents:
+
+- **Account identifiers are pseudonymised on the way out.** Stable within a
+  report, salted, and the mapping is never written to disk. It is a speed bump
+  against casual misuse, not anonymisation — a cluster described here is
+  re-identifiable by anyone with platform access, and the report says so.
+- **Per-account values never enter the document.** `build_report()` returns the
+  feature matrix to the caller instead of embedding it; `--features` writes it
+  to a file that stays with the analyst.
+- **Every figure travels with the parameters that produced it.** If no null
+  model was run, the report says the cluster count has nothing to be compared
+  against.
 
 ## Loading data
 

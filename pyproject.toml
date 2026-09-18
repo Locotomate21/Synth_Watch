@@ -85,6 +85,9 @@ ignore = ["D107", "D203", "D213", "PLR0913"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "ANN", "PLR2004", "ARG"]
+# The HTML report is one long template string. Wrapping markup at 100 columns
+# makes it harder to read, not easier, and the Python around it is short.
+"src/synthwatch/report/html.py" = ["E501"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

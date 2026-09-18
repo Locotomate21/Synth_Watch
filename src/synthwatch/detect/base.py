@@ -84,7 +84,16 @@ class FeatureExtractor(Protocol):
     """
 
     name: str
-    specs: Sequence[FeatureSpec]
+
+    @property
+    def specs(self) -> Sequence[FeatureSpec]:
+        """The features this extractor declares.
+
+        Read-only in the protocol on purpose: a mutable protocol attribute is
+        invariant, which would reject every extractor that declares its specs
+        as a plain tuple -- that is, all of them.
+        """
+        ...
 
     def extract(self, corpus: Corpus) -> pd.DataFrame:
         """Compute the features for every account in ``corpus``.
