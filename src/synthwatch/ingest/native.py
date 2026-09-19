@@ -67,6 +67,15 @@ MILLISECOND_EPOCH_CUTOFF: Final = 1e11
 HIGH_DROP_RATE: Final = 0.1
 """Above this share of skipped rows, the load itself is worth reporting."""
 
+OVERFLOW_KEY: Final = "__overflow__"
+"""Where csv puts fields a row has beyond its header.
+
+Naming it matters: left at the default, those land under a ``None`` key and
+every later lookup breaks on a key that is not a string. A row with more
+fields than its header is ragged -- usually an unquoted delimiter inside a
+value -- and half-parsing it would be worse than counting it as skipped.
+"""
+
 DEFAULT_POST_ALIASES: Final[Mapping[str, str]] = {
     "id": "post_id",
     "status_id": "post_id",
@@ -256,7 +265,14 @@ def _as_bool(value: object) -> bool | None:
 
 
 def _as_list(value: object, separator: str) -> tuple[str, ...]:
-    """Read a list column: a JSON array, a delimited string, or a real list."""
+    """Read a list column: a JSON array, a bracketed list, a delimited string.
+
+    The bracketed form matters: the Twitter Information Operations Archive
+    writes hashtags and urls as ``[tag1, tag2]``, which is not valid JSON
+    because the items are unquoted. Falling back to a split rather than
+    returning nothing is the difference between reading those columns and
+    silently dropping every hashtag in the archive.
+    """
     cleaned = _clean(value)
     if cleaned is None:
         return ()
@@ -267,7 +283,8 @@ def _as_list(value: object, separator: str) -> tuple[str, ...]:
         try:
             decoded = json.loads(text)
         except json.JSONDecodeError:
-            return ()
+            inner = text.strip()[1:-1]
+            return tuple(part.strip().strip("'\"") for part in inner.split(",") if part.strip())
         if isinstance(decoded, list):
             return tuple(str(item) for item in decoded)
         return ()
@@ -316,6 +333,7 @@ class NativeAdapter:
         account_aliases: Mapping[str, str] | None = None,
         list_separator: str = "|",
         strict: bool = False,
+        post_row_transform: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
     ) -> None:
         self.platform = platform
         self.assume_timezone = assume_timezone
@@ -323,6 +341,14 @@ class NativeAdapter:
         self.account_aliases = {**DEFAULT_ACCOUNT_ALIASES, **(account_aliases or {})}
         self.list_separator = list_separator
         self.strict = strict
+        self.post_row_transform = post_row_transform
+        """Hook for platform adapters: rewrite a raw row before it is mapped.
+
+        Aliases rename columns; this derives them. A source that encodes the
+        conversational role as ``is_retweet`` plus ``in_reply_to_tweetid``
+        needs a rule, not a rename, and that rule belongs to the adapter that
+        knows the platform rather than to the schema.
+        """
 
     # -- entry points ----------------------------------------------------
 
@@ -412,7 +438,7 @@ class NativeAdapter:
         """Read a CSV or TSV table, keeping every cell as text."""
         delimiter = "\t" if path.suffix.casefold() == ".tsv" else ","
         with path.open(encoding="utf-8-sig", newline="") as handle:
-            return list(csv.DictReader(handle, delimiter=delimiter))
+            return list(csv.DictReader(handle, delimiter=delimiter, restkey=OVERFLOW_KEY))
 
     # -- mapping ---------------------------------------------------------
 
@@ -438,6 +464,8 @@ class NativeAdapter:
 
     def _post_from_row(self, row: Mapping[str, Any]) -> Post:
         """Build a :class:`Post`, routing unknown columns into ``extra``."""
+        if self.post_row_transform is not None:
+            row = self.post_row_transform(row)
         mapped = self._rename(row, self.post_aliases)
         known = set(Post.model_fields) - {"extra"}
         payload: dict[str, Any] = {
@@ -566,6 +594,9 @@ class NativeAdapter:
         for row in rows:
             if "__parse_error__" in row:
                 skipped[f"{kind}:malformed_json"] += 1
+                continue
+            if OVERFLOW_KEY in row:
+                skipped[f"{kind}:ragged_row"] += 1
                 continue
             try:
                 yield build(row)

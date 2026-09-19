@@ -38,8 +38,11 @@ labelled training data.
       completeness, posting rate, dormancy before the first observed post
 - [x] `report` + CLI — feature distributions with their coverage, pseudonymised
       cluster cards, self-contained HTML and JSON export
+- [x] `ingest.labelled` — Bot Repository annotation files and Twitter
+      Information Operations Archive takedowns, with a coverage report that
+      names the conditions under which a trained model would be untrustworthy
 - [ ] `detect.text` (needs the `text` extra: transformers + torch)
-- [ ] `detect.ensemble` (blocked on labelled training data)
+- [ ] `detect.ensemble` (gradient boosting, calibration, SHAP)
 - [ ] ingest adapters for Reddit, Bluesky and Mastodon
 
 ## Running it
@@ -66,6 +69,33 @@ Three things the report layer enforces rather than merely documents:
 - **Every figure travels with the parameters that produced it.** If no null
   model was run, the report says the cluster count has nothing to be compared
   against.
+
+## Labelled data, and what it will not tell you
+
+```bash
+synthwatch labels posts.csv labels.dat --dataset indiana-bot-repository/varol-2017
+```
+
+```
+412 of 1500 labels matched an account (27%); 88 accounts unlabelled
+  automated: 190
+  organic: 222
+  warning: only 412 of 1500 labels matched an account in this corpus...
+```
+
+The loaders refuse to guess in two places that would otherwise be invisible.
+A numeric annotation file (`0`/`1`) is rejected unless the caller declares which
+way round it runs — both conventions exist in published datasets, and choosing
+one silently inverts a training set. An unrecognised class string raises rather
+than quietly becoming `UNKNOWN`, because a dropped class is a shrunken training
+set nobody notices.
+
+The Information Operations Archive gets its own adapter, and every account in a
+takedown is labelled `INFO_OPERATION` with `method=PLATFORM_ENFORCEMENT` —
+**not** `AUTOMATED`. Many of those accounts were run by people, by hand, full
+time. The load warns that the takedown carries a single class: a model trained
+on it plus a control group collected some other way learns to tell the two
+*collections* apart and reports an excellent score for doing it.
 
 ## Loading data
 

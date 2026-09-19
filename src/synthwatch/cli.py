@@ -18,7 +18,8 @@ from synthwatch.detect.account import AccountExtractor
 from synthwatch.detect.base import FeatureRegistry, render_catalogue
 from synthwatch.detect.coordination import CoordinationConfig, CoordinationExtractor
 from synthwatch.detect.temporal import TemporalConfig, TemporalExtractor
-from synthwatch.ingest.native import NativeAdapter, timezone_of
+from synthwatch.ingest.labelled import attach_labels, read_label_table
+from synthwatch.ingest.native import NativeAdapter, timezone_of, write_corpus
 from synthwatch.report.html import to_html
 from synthwatch.report.report import build_report, to_json
 from synthwatch.types import Platform
@@ -114,6 +115,28 @@ def _parser() -> argparse.ArgumentParser:
     analyse.add_argument("--title", default="SynthWatch analysis", help="report title")
     analyse.add_argument("--strict", action="store_true", help="fail on the first bad row")
 
+    labels = subcommands.add_parser(
+        "labels", help="check how far an annotation file reaches into a corpus"
+    )
+    labels.add_argument("posts", type=Path, help="corpus file")
+    labels.add_argument("annotations", type=Path, help="annotation file (id + class)")
+    labels.add_argument("--accounts", type=Path, help="account metadata file")
+    labels.add_argument(
+        "--dataset",
+        required=True,
+        help=(
+            "provenance recorded on every label, e.g. "
+            "indiana-bot-repository/varol-2017. Required: an evaluation that "
+            "cannot name its annotation procedure is not reproducible."
+        ),
+    )
+    labels.add_argument(
+        "--numeric-convention",
+        choices=["1_is_bot", "0_is_bot"],
+        help="required when the annotation file uses 0 and 1 as classes",
+    )
+    labels.add_argument("--out", type=Path, help="write the labelled corpus here, as native JSON")
+
     docs = subcommands.add_parser("docs", help="regenerate the feature catalogue")
     docs.add_argument("--out", type=Path, default=Path("docs/features.md"))
     return parser
@@ -179,6 +202,35 @@ def _analyse(args: argparse.Namespace) -> int:
     return 0
 
 
+def _labels(args: argparse.Namespace) -> int:
+    """Join an annotation file to a corpus and report what it actually covers."""
+    adapter = NativeAdapter()
+    loaded = (
+        adapter.load_tables(args.posts, args.accounts)
+        if args.accounts
+        else adapter.load(args.posts)
+    )
+    records = read_label_table(
+        args.annotations,
+        dataset=args.dataset,
+        numeric_convention=args.numeric_convention,
+    )
+    labelled, coverage = attach_labels(loaded.corpus, records)
+
+    print(
+        f"{coverage.n_matched} of {coverage.n_labels} labels matched an account "
+        f"({coverage.match_rate:.0%}); {coverage.n_unlabelled_accounts} accounts unlabelled"
+    )
+    for label, count in sorted(coverage.counts.items(), key=lambda item: item[0].value):
+        print(f"  {label.value}: {count}")
+    for warning in coverage.warnings:
+        print(f"  warning: {warning}", file=sys.stderr)
+    if args.out:
+        write_corpus(labelled, args.out)
+        print(f"wrote {args.out}")
+    return 0
+
+
 def _docs(args: argparse.Namespace) -> int:
     """Regenerate the feature catalogue from the declared specs."""
     registry = FeatureRegistry.from_extractors(
@@ -195,6 +247,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "analyse":
         return _analyse(args)
+    if args.command == "labels":
+        return _labels(args)
     return _docs(args)
 
 
