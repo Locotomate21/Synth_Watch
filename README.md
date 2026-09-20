@@ -41,8 +41,9 @@ labelled training data.
 - [x] `ingest.labelled` — Bot Repository annotation files and Twitter
       Information Operations Archive takedowns, with a coverage report that
       names the conditions under which a trained model would be untrustworthy
+- [x] `detect.ensemble` — calibrated gradient boosting over all 22 features,
+      SHAP attributions, and a model card that records how it was trained
 - [ ] `detect.text` (needs the `text` extra: transformers + torch)
-- [ ] `detect.ensemble` (gradient boosting, calibration, SHAP)
 - [ ] ingest adapters for Reddit, Bluesky and Mastodon
 
 ## Running it
@@ -69,6 +70,36 @@ Three things the report layer enforces rather than merely documents:
 - **Every figure travels with the parameters that produced it.** If no null
   model was run, the report says the cluster count has nothing to be compared
   against.
+
+## Training a model
+
+```bash
+synthwatch train posts.csv labels.dat --dataset indiana-bot-repository/varol-2017     --card model_card.json
+```
+
+```
+trained on 1204 accounts; classes {0: 812, 1: 392}
+  roc_auc 0.883  average_precision 0.791
+  brier 0.112  calibration error 0.038
+  negative: precision 0.88 recall 0.91
+  positive: precision 0.79 recall 0.74
+```
+
+Four things the model refuses to do:
+
+- **It never imputes a missing value.** The extractors work to distinguish "we
+  measured zero" from "we could not measure", and an imputer erases that in one
+  line. `HistGradientBoostingClassifier` sends missing values down their own
+  branch, so absence is a signal rather than a hole someone filled with a median.
+- **It has no `predict`.** Only calibrated probabilities. Turning one into a
+  decision needs a threshold, and a threshold states how much worse a false
+  accusation is than a missed bot — a question for whoever is accountable for
+  the consequences.
+- **It never computes accuracy.** On a label set where one class holds 80% of
+  the rows, accuracy measures that class. Per-class precision and recall, Brier
+  and expected calibration error are what the card carries.
+- **It refuses to train** on a single-class label set, or on fewer examples than
+  `--min-per-class`, and it says so when the model turns out to be constant.
 
 ## Labelled data, and what it will not tell you
 

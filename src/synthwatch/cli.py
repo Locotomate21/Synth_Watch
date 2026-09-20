@@ -9,6 +9,7 @@ into the report that comes out.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -17,6 +18,11 @@ from synthwatch import __version__
 from synthwatch.detect.account import AccountExtractor
 from synthwatch.detect.base import FeatureRegistry, render_catalogue
 from synthwatch.detect.coordination import CoordinationConfig, CoordinationExtractor
+from synthwatch.detect.ensemble import (
+    AutomationEnsemble,
+    EnsembleConfig,
+    summarise_probabilities,
+)
 from synthwatch.detect.temporal import TemporalConfig, TemporalExtractor
 from synthwatch.ingest.labelled import attach_labels, read_label_table
 from synthwatch.ingest.native import NativeAdapter, timezone_of, write_corpus
@@ -137,6 +143,39 @@ def _parser() -> argparse.ArgumentParser:
     )
     labels.add_argument("--out", type=Path, help="write the labelled corpus here, as native JSON")
 
+    train = subcommands.add_parser("train", help="fit a calibrated model and write its model card")
+    train.add_argument("posts", type=Path, help="corpus file")
+    train.add_argument("annotations", type=Path, help="annotation file (id + class)")
+    train.add_argument("--accounts", type=Path, help="account metadata file")
+    train.add_argument("--dataset", required=True, help="provenance for the labels")
+    train.add_argument(
+        "--numeric-convention",
+        choices=["1_is_bot", "0_is_bot"],
+        help="required when the annotation file uses 0 and 1 as classes",
+    )
+    train.add_argument(
+        "--calibration",
+        choices=["isotonic", "sigmoid"],
+        default="isotonic",
+        help="isotonic needs data; sigmoid (Platt) survives small samples",
+    )
+    train.add_argument("--folds", type=int, default=5, help="calibration and evaluation folds")
+    train.add_argument(
+        "--min-per-class",
+        type=int,
+        default=25,
+        help="refuse to train below this many examples in either class (default: 25)",
+    )
+    train.add_argument("--card", type=Path, help="write the model card here, as JSON")
+    train.add_argument(
+        "--distribution",
+        type=Path,
+        help=(
+            "write the corpus-level probability distribution here. Aggregate by "
+            "design: per-account probabilities stay in the session."
+        ),
+    )
+
     docs = subcommands.add_parser("docs", help="regenerate the feature catalogue")
     docs.add_argument("--out", type=Path, default=Path("docs/features.md"))
     return parser
@@ -231,6 +270,61 @@ def _labels(args: argparse.Namespace) -> int:
     return 0
 
 
+def _train(args: argparse.Namespace) -> int:
+    """Fit a calibrated model over the full feature matrix and report on it."""
+    adapter = NativeAdapter()
+    loaded = (
+        adapter.load_tables(args.posts, args.accounts)
+        if args.accounts
+        else adapter.load(args.posts)
+    )
+    records = read_label_table(
+        args.annotations, dataset=args.dataset, numeric_convention=args.numeric_convention
+    )
+    corpus, coverage = attach_labels(loaded.corpus, records)
+    for warning in coverage.warnings:
+        print(f"  warning: {warning}", file=sys.stderr)
+
+    _, features = build_report(corpus, title="training run")
+    model = AutomationEnsemble(
+        EnsembleConfig(
+            calibration=args.calibration,
+            n_folds=args.folds,
+            min_samples_per_class=args.min_per_class,
+        )
+    ).fit(features, corpus.labels)
+
+    card = model.card
+    assert card is not None
+    evaluation = card.evaluation
+    print(f"trained on {card.n_train} accounts; classes {dict(card.class_counts)}")
+    print(
+        f"  roc_auc {evaluation.roc_auc:.3f}  average_precision {evaluation.average_precision:.3f}"
+    )
+    print(
+        f"  brier {evaluation.calibration.brier:.3f}  "
+        f"calibration error {evaluation.calibration.expected_calibration_error:.3f}"
+    )
+    for name, scores in evaluation.per_class.items():
+        print(f"  {name}: precision {scores['precision']:.2f} recall {scores['recall']:.2f}")
+    for warning in card.warnings:
+        print(f"  warning: {warning}", file=sys.stderr)
+
+    if args.card:
+        args.card.write_text(
+            json.dumps(card.as_dict(), ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        print(f"wrote {args.card}")
+    if args.distribution:
+        summary = summarise_probabilities(model.predict_proba(features))
+        args.distribution.write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+        )
+        print(f"wrote {args.distribution}")
+    return 0
+
+
 def _docs(args: argparse.Namespace) -> int:
     """Regenerate the feature catalogue from the declared specs."""
     registry = FeatureRegistry.from_extractors(
@@ -249,6 +343,8 @@ def main(argv: list[str] | None = None) -> int:
         return _analyse(args)
     if args.command == "labels":
         return _labels(args)
+    if args.command == "train":
+        return _train(args)
     return _docs(args)
 
 
