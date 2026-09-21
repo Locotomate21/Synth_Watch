@@ -43,6 +43,8 @@ labelled training data.
       names the conditions under which a trained model would be untrustworthy
 - [x] `detect.ensemble` — calibrated gradient boosting over all 22 features,
       SHAP attributions, and a model card that records how it was trained
+- [x] `ingest.inspect` — profile an unknown file before loading it: which
+      columns map, which are missing, what a trial load would skip and why
 - [ ] `detect.text` (needs the `text` extra: transformers + torch)
 - [ ] ingest adapters for Reddit, Bluesky and Mastodon
 
@@ -71,10 +73,31 @@ Three things the report layer enforces rather than merely documents:
   model was run, the report says the cluster count has nothing to be compared
   against.
 
+## Meeting a dataset for the first time
+
+```bash
+synthwatch inspect whatever_you_downloaded.csv
+```
+
+Samples a couple of thousand rows and reports which columns the schema
+recognises, which would land in `extra`, which required field has nothing
+feeding it, and exactly what a load would skip and why. It never reads the
+whole file, so pointing it at a hundred-gigabyte archive returns immediately.
+
+Run against the published archive of X's information operations, it turns up
+two things the documentation does not mention: profile creation dates written
+as `7/3/2018`, which is either March or July, and account ids a spreadsheet
+round-trip has rewritten as `1.01421E+18` — three of them in a 352-row sample.
+Both are refused rather than guessed at, and counted rather than dropped.
+
+See [`docs/datasets.md`](docs/datasets.md) for where to get real data and what
+is wrong with each source.
+
 ## Training a model
 
 ```bash
-synthwatch train posts.csv labels.dat --dataset indiana-bot-repository/varol-2017     --card model_card.json
+synthwatch train posts.csv labels.dat \
+    --dataset indiana-bot-repository/varol-2017 --card model_card.json
 ```
 
 ```
@@ -199,6 +222,7 @@ without a GPU or a model download.
 
 - [`docs/schema.md`](docs/schema.md) — the internal schema and the decisions behind it
 - [`docs/features.md`](docs/features.md) — every feature with its rationale and its known limitation
+- [`docs/datasets.md`](docs/datasets.md) — where to get real data, and the defect in each source
 - [`ETHICS.md`](ETHICS.md) — scope, refusals, and how results should be read
 
 ## License

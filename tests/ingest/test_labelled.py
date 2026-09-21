@@ -357,3 +357,68 @@ class TestLabelsCommand:
         annotations.write_text("a0\t1\n", encoding="utf-8")
         with pytest.raises(UnknownClassError, match="numeric class"):
             main(["labels", str(corpus_file), str(annotations), "--dataset", "d"])
+
+
+# The exact header of ioa_tweets.csv in the Internet Archive mirror of X's
+# information operations disclosures, with rows shaped like the real ones.
+REAL_TWEETS = (
+    "tweetid,userid,user_display_name,user_screen_name,user_reported_location,"
+    "user_profile_description,user_profile_url,follower_count,following_count,"
+    "account_creation_date,account_language,tweet_language,tweet_text,tweet_time,"
+    "tweet_client_name,in_reply_to_userid,in_reply_to_tweetid,quoted_tweet_tweetid,"
+    "is_retweet,retweet_userid,retweet_tweetid,latitude,longitude,quote_count,"
+    "reply_count,like_count,retweet_count,hashtags,urls,user_mentions,poll_choices\n"
+    "898925911294132224,ygQRwhQRrh1+6N7J6IMFnzWgqUGimWqg0KZptLpxDY=,"
+    "ygQRwhQRrh1+6N7J6IMFnzWgqUGimWqg0KZptLpxDY=,"
+    "ygQRwhQRrh1+6N7J6IMFnzWgqUGimWqg0KZptLpxDY=,"
+    '"Dhaka, Bangladesh",Only news portal,,17,23,2016-12-04,en,bn,'
+    "Un mensaje del archivo real,2017-08-19 15:13,dlvr.it,,,,False,,,absent,absent,"
+    "0.0,0.0,0.0,0.0,[],['http://dlvr.it/PgB3PP'],[],\n"
+    "861871665780846592,0OvJRirnL32w7blCoMRthk30yPlXapfIPFac4Eyje0k=,"
+    "0OvJRirnL32w7blCoMRthk30yPlXapfIPFac4Eyje0k=,"
+    "0OvJRirnL32w7blCoMRthk30yPlXapfIPFac4Eyje0k=,"
+    "Bangladesh,FB link,,758,11,2017-05-08,en,bn,"
+    "Otro mensaje del archivo real,2017-05-09 09:41,Twitter Web Client,,,,True,,,"
+    "absent,absent,0.0,0.0,0.0,0.0,\"['uno', 'dos']\",[],[],\n"
+)
+
+
+class TestRealArchiveShape:
+    """Against the actual column layout of the published archive."""
+
+    @pytest.fixture
+    def real_tweets(self, tmp_path: Path) -> Path:
+        path = tmp_path / "ioa_tweets.csv"
+        path.write_text(REAL_TWEETS, encoding="utf-8")
+        return path
+
+    def test_profiles_are_derived_when_no_users_file_is_given(self, real_tweets: Path):
+        # The consolidated file repeats every profile column on each tweet row.
+        result = IOArchiveAdapter(dataset="x-io/consolidated").load(real_tweets)
+        assert result.report.n_posts == 2
+        assert result.report.n_accounts == 2
+        account = result.corpus.accounts_by_id["ygQRwhQRrh1+6N7J6IMFnzWgqUGimWqg0KZptLpxDY="]
+        assert account.followers_count == 17
+        assert account.location == "Dhaka, Bangladesh"
+        assert account.created_at is not None
+
+    def test_python_repr_lists_are_read(self, real_tweets: Path):
+        # The archive writes ['a', 'b'], which is not JSON.
+        corpus = IOArchiveAdapter(dataset="d").load(real_tweets).corpus
+        first = next(p for p in corpus.posts if p.post_id == "898925911294132224")
+        second = next(p for p in corpus.posts if p.post_id == "861871665780846592")
+        assert first.urls == ("http://dlvr.it/PgB3PP",)
+        assert second.hashtags == ("uno", "dos")
+
+    def test_the_placeholder_geo_values_land_in_extra(self, real_tweets: Path):
+        corpus = IOArchiveAdapter(dataset="d").load(real_tweets).corpus
+        assert corpus.posts[0].extra["latitude"] == "absent"
+
+    def test_float_counts_are_read_as_integers(self, real_tweets: Path):
+        corpus = IOArchiveAdapter(dataset="d").load(real_tweets).corpus
+        assert corpus.posts[0].like_count == 0
+
+    def test_everything_is_labelled_once(self, real_tweets: Path):
+        corpus = IOArchiveAdapter(dataset="d").load(real_tweets).corpus
+        assert len(corpus.labels) == 2
+        assert {r.label for r in corpus.labels} == {Label.INFO_OPERATION}

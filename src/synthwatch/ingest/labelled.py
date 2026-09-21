@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 from synthwatch.ingest.base import IngestReport, LoadResult
-from synthwatch.ingest.native import NativeAdapter
+from synthwatch.ingest.native import DateOrder, NativeAdapter
 from synthwatch.models import Corpus, LabelRecord
 from synthwatch.types import AccountId, Label, LabelMethod, Platform, PostKind
 
@@ -86,7 +86,6 @@ IO_ARCHIVE_POST_ALIASES: Final[Mapping[str, str]] = {
     "in_reply_to_tweetid": "parent_post_id",
     "tweet_client_name": "client",
     "user_mentions": "mentions",
-    "quote_count": "reply_count",
 }
 
 IO_ARCHIVE_ACCOUNT_ALIASES: Final[Mapping[str, str]] = {
@@ -237,6 +236,40 @@ def _column_index(header: Sequence[str], wanted: str, *, default: int) -> int:
 # --------------------------------------------------------------------------
 
 
+PROFILE_COLUMNS: Final = (
+    "userid",
+    "user_display_name",
+    "user_screen_name",
+    "user_reported_location",
+    "user_profile_description",
+    "user_profile_url",
+    "follower_count",
+    "following_count",
+    "account_creation_date",
+    "account_language",
+)
+"""Profile columns the consolidated archive repeats on every tweet row."""
+
+
+def _accounts_from_tweets(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """Derive one profile per account from the repeated columns on tweet rows.
+
+    The first occurrence wins. Later rows carry the same snapshot, and where
+    they do not -- the archive is not perfectly consistent -- picking the first
+    is at least a rule that can be stated, rather than whichever row happened
+    to be last.
+    """
+    seen: dict[str, Mapping[str, Any]] = {}
+    for row in rows:
+        account_id = str(row.get("userid") or "").strip()
+        if not account_id or account_id in seen:
+            continue
+        seen[account_id] = {column: row[column] for column in PROFILE_COLUMNS if column in row}
+    return list(seen.values())
+
+
 def _io_archive_row(row: Mapping[str, Any]) -> dict[str, Any]:
     """Derive the fields the archive encodes as flags rather than columns."""
     derived = dict(row)
@@ -271,7 +304,14 @@ class IOArchiveAdapter:
     name = "twitter-io-archive"
     platform = Platform.TWITTER
 
-    def __init__(self, *, dataset: str, timezone: tzinfo = UTC, strict: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        dataset: str,
+        timezone: tzinfo = UTC,
+        date_order: DateOrder | None = None,
+        strict: bool = False,
+    ) -> None:
         """Build the adapter.
 
         Args:
@@ -285,12 +325,17 @@ class IOArchiveAdapter:
                 adapter that knows the source -- which is the difference
                 between stating a fact about a format and having a parser guess
                 per row. Override it if a particular release says otherwise.
+            date_order: How to read slash dates. The consolidated archive
+                writes profile creation dates as ``7/3/2018``, which is
+                ambiguous; without a declared order those rows are counted
+                and skipped rather than guessed at.
             strict: Raise on the first unparsable row instead of counting it.
         """
         self.dataset = dataset
         self._adapter = NativeAdapter(
             platform=Platform.TWITTER,
             assume_timezone=timezone,
+            date_order=date_order,
             post_aliases=IO_ARCHIVE_POST_ALIASES,
             account_aliases=IO_ARCHIVE_ACCOUNT_ALIASES,
             post_row_transform=_io_archive_row,
@@ -309,10 +354,22 @@ class IOArchiveAdapter:
     def load_takedown(self, tweets: Path, users: Path | None = None) -> LoadResult:
         """Read a takedown's tweets and, when available, its profiles.
 
+        The consolidated archive repeats every profile column on each tweet
+        row, so a separate users file is optional: without one the profiles are
+        derived from the tweets themselves, keeping the first occurrence of
+        each account.
+
         Returns:
             A load result whose corpus already carries one label per account.
         """
-        loaded = self._adapter.load_tables(tweets, users)
+        post_rows = self._adapter.read_records(tweets)
+        account_rows = (
+            self._adapter.read_records(users)
+            if users is not None
+            else _accounts_from_tweets(post_rows)
+        )
+        source = tweets.name if users is None else f"{tweets.name}+{users.name}"
+        loaded = self._adapter.from_records(source, post_rows, account_rows)
         corpus = loaded.corpus
         account_ids = sorted(
             {account.account_id for account in corpus.accounts} | set(corpus.posts_by_account)

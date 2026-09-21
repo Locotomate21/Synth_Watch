@@ -16,8 +16,11 @@ import pytest
 from synthwatch.detect.coordination import detect_coordination
 from synthwatch.ingest import REGISTRY
 from synthwatch.ingest.native import (
+    AmbiguousDateError,
+    CorruptedIdentifierError,
     NaiveTimestampError,
     NativeAdapter,
+    check_identifier,
     parse_timestamp,
     timezone_of,
     write_corpus,
@@ -399,3 +402,104 @@ def test_assume_timezone_shifts_the_whole_file(tmp_path: Path):
     adapter = NativeAdapter(assume_timezone=timezone(timedelta(hours=2)))
     post: Post = adapter.load(path).corpus.posts[0]
     assert post.created_at == datetime(2024, 3, 1, 10, 0, tzinfo=UTC)
+
+
+class TestAmbiguousDates:
+    def test_a_slash_date_that_could_go_either_way_is_refused(self):
+        # 7/3/2018 is the 7th of March or the 3rd of July. Four months apart,
+        # and nothing downstream would look wrong.
+        with pytest.raises(AmbiguousDateError, match="ambiguous date"):
+            parse_timestamp("7/3/2018", assume_timezone=UTC)
+
+    @pytest.mark.parametrize(
+        ("order", "month"),
+        [("dmy", 3), ("mdy", 7)],
+    )
+    def test_a_declared_order_is_applied(self, order: str, month: int):
+        parsed = parse_timestamp("7/3/2018", assume_timezone=UTC, date_order=order)  # type: ignore[arg-type]
+        assert parsed.month == month
+
+    def test_an_unambiguous_day_first_date_needs_no_declaration(self):
+        # 13 cannot be a month.
+        assert parse_timestamp("13/7/2018", assume_timezone=UTC).day == 13
+
+    def test_an_unambiguous_month_first_date_needs_no_declaration(self):
+        assert parse_timestamp("7/13/2018", assume_timezone=UTC).day == 13
+
+    def test_a_time_after_the_date_is_kept(self):
+        parsed = parse_timestamp("13/7/2018 21:45", assume_timezone=UTC)
+        assert (parsed.hour, parsed.minute) == (21, 45)
+
+    def test_ambiguous_rows_are_counted_with_their_own_reason(self, tmp_path: Path):
+        path = tmp_path / "posts.csv"
+        path.write_text(
+            "post_id,account_id,created_at,text\np1,a1,7/3/2018 10:00,hola\n",
+            encoding="utf-8",
+        )
+        report = NativeAdapter().load(path).report
+        assert report.skip_reasons["post:ambiguous_date"] == 1
+
+    def test_declaring_the_order_on_the_adapter_recovers_them(self, tmp_path: Path):
+        path = tmp_path / "posts.csv"
+        path.write_text(
+            "post_id,account_id,created_at,text\np1,a1,7/3/2018 10:00,hola\n",
+            encoding="utf-8",
+        )
+        # Two separate declarations: the date order says how to read 7/3, the
+        # timezone says what the clock means. Neither implies the other.
+        adapter = NativeAdapter(date_order="mdy", assume_timezone=UTC)
+        assert adapter.load(path).corpus.posts[0].created_at.month == 7
+
+    def test_the_date_order_alone_does_not_declare_the_timezone(self, tmp_path: Path):
+        path = tmp_path / "posts.csv"
+        path.write_text(
+            "post_id,account_id,created_at,text\np1,a1,7/3/2018 10:00,hola\n",
+            encoding="utf-8",
+        )
+        report = NativeAdapter(date_order="mdy").load(path).report
+        assert report.skip_reasons["post:naive_timestamp"] == 1
+
+
+class TestCorruptedIdentifiers:
+    @pytest.mark.parametrize("value", ["1.01421E+18", "9.8765e+17", "1E+18"])
+    def test_scientific_notation_ids_are_refused(self, value: str):
+        # A spreadsheet round-trip turns an 18-digit id into this. It looks like
+        # data and joins to nothing.
+        with pytest.raises(CorruptedIdentifierError, match="scientific notation"):
+            check_identifier(value, field="account_id")
+
+    @pytest.mark.parametrize(
+        "value",
+        ["898925911294132224", "ygQRwhQRrh1+6N7J6IMFnzWgqUGimWqg0KZptLpxDY=", "user_42"],
+    )
+    def test_real_identifiers_pass(self, value: str):
+        assert check_identifier(value, field="account_id") == value
+
+    def test_corrupted_rows_are_counted_with_their_own_reason(self, tmp_path: Path):
+        path = tmp_path / "posts.csv"
+        path.write_text(
+            "post_id,account_id,created_at,text\n"
+            "p1,1.01421E+18,2024-03-01T12:00:00Z,hola\n"
+            "p2,a2,2024-03-01T12:00:00Z,adios\n",
+            encoding="utf-8",
+        )
+        report = NativeAdapter().load(path).report
+        assert report.n_posts == 1
+        assert report.skip_reasons["post:corrupted_identifier"] == 1
+
+
+class TestRecordSeams:
+    def test_rows_can_be_read_and_mapped_separately(self, posts_csv: Path):
+        # The seam every platform adapter builds on.
+        adapter = NativeAdapter()
+        rows = adapter.read_records(posts_csv)
+        assert len(rows) == 3
+        result = adapter.from_records("in-memory", rows)
+        assert result.report.n_posts == 3
+        assert result.report.source == "in-memory"
+
+    def test_rearranged_rows_still_go_through_the_same_accounting(self):
+        adapter = NativeAdapter()
+        rows = [{"post_id": "p1", "account_id": "a1", "created_at": "nope", "text": "x"}]
+        report = adapter.from_records("in-memory", rows).report
+        assert report.n_skipped == 1

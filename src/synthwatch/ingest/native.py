@@ -33,11 +33,12 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
-from typing import Any, Final, TypeVar
+from typing import Any, Final, Literal, TypeVar
 
 from pydantic import ValidationError
 
@@ -48,12 +49,18 @@ from synthwatch.types import Platform
 __all__ = [
     "DEFAULT_ACCOUNT_ALIASES",
     "DEFAULT_POST_ALIASES",
+    "AmbiguousDateError",
+    "CorruptedIdentifierError",
+    "DateOrder",
     "NaiveTimestampError",
     "NativeAdapter",
     "parse_timestamp",
     "timezone_of",
     "write_corpus",
 ]
+
+DateOrder = Literal["dmy", "mdy"]
+"""Which way round a file writes slash dates. There is no default."""
 
 _Record = TypeVar("_Record")
 
@@ -160,7 +167,26 @@ class NaiveTimestampError(ValueError):
     """Raised when a timestamp has no offset and none was declared."""
 
 
-def parse_timestamp(value: object, *, assume_timezone: tzinfo | None = None) -> datetime:
+class AmbiguousDateError(ValueError):
+    """Raised when a slash date could be read two ways and none was declared."""
+
+
+class CorruptedIdentifierError(ValueError):
+    """Raised when an identifier has visibly lost precision.
+
+    A spreadsheet that opens a CSV of 18-digit account ids and saves it again
+    rewrites them as ``1.01421E+18``. The value looks like data, joins to
+    nothing, and silently drops that account out of every merge it takes part
+    in. Real published datasets contain rows in exactly this state.
+    """
+
+
+def parse_timestamp(
+    value: object,
+    *,
+    assume_timezone: tzinfo | None = None,
+    date_order: DateOrder | None = None,
+) -> datetime:
     """Parse a timestamp from a CSV cell or a JSON value.
 
     Accepts ISO 8601 strings (including a trailing ``Z``), epoch seconds and
@@ -172,9 +198,12 @@ def parse_timestamp(value: object, *, assume_timezone: tzinfo | None = None) -> 
             ``None`` to refuse naive input, which is the default because a
             wrong offset is invisible downstream and corrupts every temporal
             feature.
+        date_order: How to read a slash date whose first two components are
+            both 12 or below. Leave it ``None`` to refuse those.
 
     Raises:
         NaiveTimestampError: If the value has no offset and none was declared.
+        AmbiguousDateError: If a slash date could be read two ways.
         ValueError: If the value cannot be parsed at all.
     """
     if isinstance(value, datetime):
@@ -190,11 +219,13 @@ def parse_timestamp(value: object, *, assume_timezone: tzinfo | None = None) -> 
             msg = "empty timestamp"
             raise ValueError(msg)
         if raw.lstrip("-").replace(".", "", 1).isdigit():
-            return parse_timestamp(float(raw), assume_timezone=assume_timezone)
+            return parse_timestamp(
+                float(raw), assume_timezone=assume_timezone, date_order=date_order
+            )
         try:
             parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         except ValueError:
-            parsed = _parse_common_formats(raw)
+            parsed = _parse_common_formats(raw, date_order)
 
     if parsed.tzinfo is None:
         if assume_timezone is None:
@@ -208,24 +239,83 @@ def parse_timestamp(value: object, *, assume_timezone: tzinfo | None = None) -> 
     return parsed
 
 
-def _parse_common_formats(raw: str) -> datetime:
+UNAMBIGUOUS_MONTH = 12
+"""A slash-date component above this can only be a day."""
+
+_SLASH_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$")
+
+_ISO_FORMATS: Final = (
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%d",
+    "%Y/%m/%d %H:%M:%S",
+    "%Y/%m/%d",
+    "%a %b %d %H:%M:%S %z %Y",  # legacy Twitter
+)
+
+
+def _parse_slash_date(match: re.Match[str], date_order: DateOrder | None) -> datetime:
+    """Parse ``7/3/2018``, refusing when the order is genuinely ambiguous.
+
+    ``13/7/2018`` can only be day-first and ``7/13/2018`` can only be
+    month-first, so those are read without ceremony. ``7/3/2018`` is either the
+    7th of March or the 3rd of July, and the two readings are four months
+    apart. Guessing there would quietly shift account ages and posting dates by
+    up to a year, so it is refused unless the caller states the order.
+    """
+    first, second, year = (int(match.group(index)) for index in (1, 2, 3))
+    hour, minute, second_of = (int(match.group(i) or 0) for i in (4, 5, 6))
+
+    if first > UNAMBIGUOUS_MONTH and second <= UNAMBIGUOUS_MONTH:
+        day, month = first, second
+    elif second > UNAMBIGUOUS_MONTH and first <= UNAMBIGUOUS_MONTH:
+        month, day = first, second
+    elif date_order is None:
+        msg = (
+            f"ambiguous date {match.group(0)!r}: it is either day/month or "
+            "month/day, and the two readings differ by months. Pass "
+            "date_order='dmy' or 'mdy' to state which this file uses."
+        )
+        raise AmbiguousDateError(msg)
+    elif date_order == "dmy":
+        day, month = first, second
+    else:
+        month, day = first, second
+    return datetime(year, month, day, hour, minute, second_of)  # noqa: DTZ001 - caller attaches
+
+
+def _parse_common_formats(raw: str, date_order: DateOrder | None = None) -> datetime:
     """Fall back to the timestamp layouts the archives actually ship."""
-    formats = (
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%d",
-        "%Y/%m/%d %H:%M:%S",
-        "%d/%m/%Y %H:%M:%S",
-        "%d/%m/%Y %H:%M",
-        "%a %b %d %H:%M:%S %z %Y",  # legacy Twitter
-    )
-    for layout in formats:
+    slash = _SLASH_DATE.match(raw.strip())
+    if slash:
+        return _parse_slash_date(slash, date_order)
+    for layout in _ISO_FORMATS:
         try:
             return datetime.strptime(raw, layout)  # noqa: DTZ007 - naiveté handled by caller
         except ValueError:
             continue
     msg = f"unrecognised timestamp format: {raw!r}"
     raise ValueError(msg)
+
+
+_SCIENTIFIC_NOTATION = re.compile(r"^\d+(\.\d+)?[eE][+-]?\d+$")
+
+
+def check_identifier(value: str, *, field: str) -> str:
+    """Reject an identifier a spreadsheet has already destroyed.
+
+    Raises:
+        CorruptedIdentifierError: If the value is in scientific notation,
+            which for an id means its digits are gone for good.
+    """
+    if _SCIENTIFIC_NOTATION.match(value.strip()):
+        msg = (
+            f"{field} {value!r} is in scientific notation: a spreadsheet has "
+            "rounded this identifier and its digits cannot be recovered. It "
+            "would join to nothing."
+        )
+        raise CorruptedIdentifierError(msg)
+    return value
 
 
 def _clean(value: object) -> object | None:
@@ -313,6 +403,8 @@ class NativeAdapter:
         platform: Platform stamped on records that do not carry their own
             ``platform`` column.
         assume_timezone: Timezone for naive timestamps. ``None`` refuses them.
+        date_order: How to read slash dates such as ``7/3/2018``. ``None``
+            refuses the ambiguous ones.
         post_aliases: Extra source-column to schema-field mappings for posts,
             merged over :data:`DEFAULT_POST_ALIASES`.
         account_aliases: The same, for accounts.
@@ -329,6 +421,7 @@ class NativeAdapter:
         *,
         platform: Platform = Platform.GENERIC,
         assume_timezone: tzinfo | None = None,
+        date_order: DateOrder | None = None,
         post_aliases: Mapping[str, str] | None = None,
         account_aliases: Mapping[str, str] | None = None,
         list_separator: str = "|",
@@ -337,6 +430,7 @@ class NativeAdapter:
     ) -> None:
         self.platform = platform
         self.assume_timezone = assume_timezone
+        self.date_order = date_order
         self.post_aliases = {**DEFAULT_POST_ALIASES, **(post_aliases or {})}
         self.account_aliases = {**DEFAULT_ACCOUNT_ALIASES, **(account_aliases or {})}
         self.list_separator = list_separator
@@ -381,12 +475,34 @@ class NativeAdapter:
     ) -> LoadResult:
         """Read posts, accounts and labels from separate files."""
         source = posts.name if accounts is None else f"{posts.name}+{accounts.name}"
-        return self._build(
+        return self.from_records(
             source,
             self._read_any(posts),
             self._read_any(accounts) if accounts else (),
             self._read_any(labels) if labels else (),
         )
+
+    def read_records(self, path: Path) -> Sequence[Mapping[str, Any]]:
+        """Read a file into raw rows, without mapping them onto the schema.
+
+        The seam a platform adapter builds on: read once, rearrange, then hand
+        the rows back through :meth:`from_records`.
+        """
+        return self._read_any(path)
+
+    def from_records(
+        self,
+        source: str,
+        post_rows: Iterable[Mapping[str, Any]],
+        account_rows: Iterable[Mapping[str, Any]] = (),
+        label_rows: Iterable[Mapping[str, Any]] = (),
+    ) -> LoadResult:
+        """Map already-read rows onto the schema, counting every failure.
+
+        Platform adapters use this rather than reimplementing the mapping, so
+        that the drop-rate accounting is the same everywhere.
+        """
+        return self._build(source, post_rows, account_rows, label_rows)
 
     # -- readers ---------------------------------------------------------
 
@@ -474,13 +590,20 @@ class NativeAdapter:
         extra = _merge_extra(mapped, known)
 
         payload["created_at"] = parse_timestamp(
-            mapped.get("created_at", ""), assume_timezone=self.assume_timezone
+            mapped.get("created_at", ""),
+            assume_timezone=self.assume_timezone,
+            date_order=self.date_order,
         )
         if mapped.get("collected_at"):
             payload["collected_at"] = parse_timestamp(
-                mapped["collected_at"], assume_timezone=self.assume_timezone
+                mapped["collected_at"],
+                assume_timezone=self.assume_timezone,
+                date_order=self.date_order,
             )
         payload["platform"] = self._platform_of(mapped)
+        for name in ("post_id", "account_id"):
+            if payload.get(name) is not None:
+                check_identifier(str(payload[name]), field=name)
         payload["text"] = str(_clean(mapped.get("text")) or "")
         for name in _POST_INT_FIELDS:
             if name in payload:
@@ -503,10 +626,16 @@ class NativeAdapter:
 
         for name in ("created_at", "collected_at"):
             if mapped.get(name):
-                payload[name] = parse_timestamp(mapped[name], assume_timezone=self.assume_timezone)
+                payload[name] = parse_timestamp(
+                    mapped[name],
+                    assume_timezone=self.assume_timezone,
+                    date_order=self.date_order,
+                )
             else:
                 payload.pop(name, None)
         payload["platform"] = self._platform_of(mapped)
+        if payload.get("account_id") is not None:
+            check_identifier(str(payload["account_id"]), field="account_id")
         for name in _ACCOUNT_INT_FIELDS:
             if name in payload:
                 payload[name] = _as_int(payload[name])
@@ -523,7 +652,9 @@ class NativeAdapter:
         payload["platform"] = self._platform_of(row)
         if payload.get("labelled_at"):
             payload["labelled_at"] = parse_timestamp(
-                payload["labelled_at"], assume_timezone=self.assume_timezone
+                payload["labelled_at"],
+                assume_timezone=self.assume_timezone,
+                date_order=self.date_order,
             )
         return LabelRecord.model_validate(payload)
 
@@ -600,18 +731,28 @@ class NativeAdapter:
                 continue
             try:
                 yield build(row)
-            except NaiveTimestampError:
-                if self.strict:
-                    raise
-                skipped[f"{kind}:naive_timestamp"] += 1
-            except ValidationError as error:
-                if self.strict:
-                    raise
-                skipped[f"{kind}:{_validation_reason(error)}"] += 1
             except (ValueError, TypeError, KeyError) as error:
                 if self.strict:
                     raise
-                skipped[f"{kind}:{type(error).__name__}"] += 1
+                skipped[f"{kind}:{_skip_reason(error)}"] += 1
+
+
+_SKIP_REASONS: Final[Mapping[type[Exception], str]] = {
+    NaiveTimestampError: "naive_timestamp",
+    AmbiguousDateError: "ambiguous_date",
+    CorruptedIdentifierError: "corrupted_identifier",
+}
+"""Named reasons for the failures a report should be able to act on."""
+
+
+def _skip_reason(error: Exception) -> str:
+    """Compress a failure into a countable reason string."""
+    for kind, reason in _SKIP_REASONS.items():
+        if isinstance(error, kind):
+            return reason
+    if isinstance(error, ValidationError):
+        return _validation_reason(error)
+    return type(error).__name__
 
 
 def _validation_reason(error: ValidationError) -> str:

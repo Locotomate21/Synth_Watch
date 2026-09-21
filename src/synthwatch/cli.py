@@ -24,6 +24,7 @@ from synthwatch.detect.ensemble import (
     summarise_probabilities,
 )
 from synthwatch.detect.temporal import TemporalConfig, TemporalExtractor
+from synthwatch.ingest.inspect import inspect_file, render_profile
 from synthwatch.ingest.labelled import attach_labels, read_label_table
 from synthwatch.ingest.native import NativeAdapter, timezone_of, write_corpus
 from synthwatch.report.html import to_html
@@ -176,6 +177,37 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
 
+    inspect = subcommands.add_parser(
+        "inspect", help="profile an unknown file before trying to analyse it"
+    )
+    inspect.add_argument("path", type=Path, help="file to profile")
+    inspect.add_argument(
+        "--kind",
+        choices=["posts", "accounts"],
+        default="posts",
+        help="which alias table to check the columns against",
+    )
+    inspect.add_argument("--rows", type=int, default=2000, help="rows to sample (default: 2000)")
+    inspect.add_argument(
+        "--alias",
+        action="append",
+        default=[],
+        metavar="COLUMN=FIELD",
+        help="map a source column onto a schema field; repeatable",
+    )
+    inspect.add_argument(
+        "--assume-timezone",
+        type=float,
+        metavar="HOURS",
+        help="UTC offset for naive timestamps, to see what a real load would do",
+    )
+    inspect.add_argument(
+        "--date-order",
+        choices=["dmy", "mdy"],
+        help="how to read slash dates such as 7/3/2018",
+    )
+    inspect.add_argument("--json", type=Path, help="write the profile here, as JSON")
+
     docs = subcommands.add_parser("docs", help="regenerate the feature catalogue")
     docs.add_argument("--out", type=Path, default=Path("docs/features.md"))
     return parser
@@ -239,6 +271,39 @@ def _analyse(args: argparse.Namespace) -> int:
     if not written:
         print("no output written; pass --html, --json or --features", file=sys.stderr)
     return 0
+
+
+def _aliases(pairs: list[str]) -> dict[str, str]:
+    """Parse repeated ``--alias column=field`` options."""
+    mapping: dict[str, str] = {}
+    for pair in pairs:
+        column, _, field = pair.partition("=")
+        if not column or not field:
+            msg = f"expected --alias COLUMN=FIELD, got {pair!r}"
+            raise ValueError(msg)
+        mapping[column.strip().casefold()] = field.strip()
+    return mapping
+
+
+def _inspect(args: argparse.Namespace) -> int:
+    """Profile a file and say what a load would make of it."""
+    aliases = _aliases(args.alias)
+    adapter = NativeAdapter(
+        assume_timezone=timezone_of(args.assume_timezone)
+        if args.assume_timezone is not None
+        else None,
+        date_order=args.date_order,
+        post_aliases=aliases if args.kind == "posts" else None,
+        account_aliases=aliases if args.kind == "accounts" else None,
+    )
+    profile = inspect_file(args.path, kind=args.kind, sample_rows=args.rows, adapter=adapter)
+    print(render_profile(profile))
+    if args.json:
+        args.json.write_text(
+            json.dumps(profile.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"wrote {args.json}")
+    return 0 if profile.usable else 1
 
 
 def _labels(args: argparse.Namespace) -> int:
@@ -341,6 +406,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "analyse":
         return _analyse(args)
+    if args.command == "inspect":
+        return _inspect(args)
     if args.command == "labels":
         return _labels(args)
     if args.command == "train":
