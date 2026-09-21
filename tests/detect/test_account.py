@@ -20,6 +20,7 @@ from synthwatch.detect.account import (
     available_profile_fields,
     digit_ratio,
     handle_shape,
+    has_pseudonymised_identity,
     profile_completeness,
     trailing_digits,
 )
@@ -348,3 +349,66 @@ class TestConfig:
 
 def test_epoch_reference_is_what_the_fixtures_assume():
     assert datetime(2024, 3, 1, 12, 0, tzinfo=UTC) == EPOCH
+
+
+class TestPseudonymisedIdentities:
+    """Archives anonymise, and the anonymisation looks exactly like data."""
+
+    def _hashed(self, digest: str = "MoOvnxuLWFdv+xY3Q8354PM4Zv2KhI2Y5V+jfwCnU0=") -> Account:
+        # The shape the Information Operations archive ships for any account
+        # below its follower threshold: id, handle and display name all one hash.
+        return Account(
+            account_id=digest,
+            platform=Platform.TWITTER,
+            handle=digest,
+            display_name=digest,
+            created_at=EPOCH - timedelta(days=900),
+            followers_count=4,
+            following_count=7,
+        )
+
+    def test_a_handle_that_is_the_account_id_is_recognised(self):
+        assert has_pseudonymised_identity(self._hashed())
+
+    def test_a_real_handle_is_not(self):
+        assert not has_pseudonymised_identity(make_account("a1", handle="maria_lopez"))
+
+    def test_it_also_catches_a_display_name_set_to_the_id(self):
+        account = make_account("abc123", display_name="abc123", handle="maria")
+        assert has_pseudonymised_identity(account)
+
+    def test_handle_features_are_withheld_not_computed(self):
+        # A base64 digest has the digit ratio and entropy of a digest. Reporting
+        # that would describe the anonymisation, not the account.
+        frame = AccountExtractor().extract(build_corpus([self._hashed()], [], collected_at=EPOCH))
+        row = frame.loc["MoOvnxuLWFdv+xY3Q8354PM4Zv2KhI2Y5V+jfwCnU0="]
+        for name in (
+            "acct_handle_digit_ratio",
+            "acct_handle_trailing_digits",
+            "acct_handle_entropy",
+        ):
+            assert math.isnan(cast("float", row[name])), name
+
+    def test_the_other_features_still_work(self):
+        frame = AccountExtractor().extract(build_corpus([self._hashed()], [], collected_at=EPOCH))
+        row = frame.loc["MoOvnxuLWFdv+xY3Q8354PM4Zv2KhI2Y5V+jfwCnU0="]
+        assert row["acct_age_days"] == pytest.approx(900.0)
+        assert not math.isnan(cast("float", row["acct_followback_ratio"]))
+
+    def test_a_hashed_display_name_does_not_inflate_completeness(self):
+        # Otherwise every anonymised account gets a quarter of the score free.
+        described = make_account("real", description="Vecina del barrio")
+        frame = AccountExtractor().extract(
+            build_corpus([self._hashed(), described], [], collected_at=EPOCH)
+        )
+        hashed = "MoOvnxuLWFdv+xY3Q8354PM4Zv2KhI2Y5V+jfwCnU0="
+        assert frame.loc[hashed, "acct_profile_completeness"] == 0.0
+
+    def test_coverage_reports_how_much_of_the_corpus_was_readable(self):
+        # The point of withholding: the coverage figure becomes the measure of
+        # how much of the dataset could actually be read.
+        corpus = build_corpus(
+            [self._hashed(), make_account("real", handle="maria_lopez")], [], collected_at=EPOCH
+        )
+        column = AccountExtractor().extract(corpus)["acct_handle_entropy"]
+        assert column.notna().sum() == 1

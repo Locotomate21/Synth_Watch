@@ -48,6 +48,7 @@ Four things it turns up, which the loaders now handle explicitly:
 | Some `userid` values read `1.01421E+18` | A spreadsheet round-trip destroyed an 18-digit id. **2,315 rows of the real file — 2.6%.** They join to nothing and are counted as skipped. |
 | Timestamps carry no offset | The archive documents them as UTC; `IOArchiveAdapter` declares that once rather than guessing per row. |
 | One row repeats the header | The consolidated file was built by concatenating per-takedown exports without stripping their headers. |
+| 97% of handles are a hash | The archive anonymises every account below its follower threshold by rewriting `userid`, `user_display_name` and `user_screen_name` to one digest. |
 
 **The defect you must report:** this dataset has **one class**. Every account in
 it was removed. A model trained on it plus a control group collected some other
@@ -57,6 +58,37 @@ refuses to train on it alone.
 
 `INFO_OPERATION` is not a synonym for `AUTOMATED` — many of these accounts were
 run by people, full time, by hand.
+
+### The anonymisation is the bigger trap
+
+Accounts below the archive's follower threshold have their id, display name and
+screen name replaced by a single hash. That is 97% of the file, and it means
+the handle a naive loader reads is a base64 digest.
+
+Computed over that, the handle features describe the *anonymisation*: a digest
+has the digit ratio and character entropy of a digest. The first run of this
+pipeline against the file reported a handle-entropy median of 0.96 at 100%
+coverage, which is the entropy of base64 and says nothing at all about how the
+accounts were named. Profile completeness was inflated the same way, because a
+display name set to the account's own hash counted as a filled-in field.
+
+`has_pseudonymised_identity` now detects the pattern — any identity field equal
+to the account id — and the affected features are withheld. The honest picture:
+
+| feature | coverage | p10 | median | p90 |
+| --- | ---: | ---: | ---: | ---: |
+| `acct_age_days` | 100% | 1450 | 1820 | 3530 |
+| `acct_followback_ratio` | 75% | 0.00 | 0.33 | 0.80 |
+| `acct_profile_completeness` | 100% | 0.00 | 0.00 | 0.67 |
+| `acct_handle_digit_ratio` | **3%** | 0.00 | 0.00 | 0.33 |
+| `acct_handle_entropy` | **3%** | 0.94 | 0.97 | 1.00 |
+
+The coverage column is the point: 3% is the share of the dataset whose handles
+can be read at all. Profile completeness also moved — its median fell from 0.25
+to 0.00 once the hashed display name stopped counting, which means half of
+these accounts filled in nothing whatsoever.
+
+The file also carries **240 duplicate account ids** across its 84,972 rows.
 
 ---
 

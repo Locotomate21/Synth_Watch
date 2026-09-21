@@ -14,8 +14,12 @@ dist/
 .coverage
 htmlcov/
 
-# Never commit collected data or exported reports.
+# Never commit collected data or exported reports. Datasets land wherever the
+# download put them, so match them by name as well as by directory.
 data/
 out/
+ioa_*.csv
+*_tweets*.csv
+*_users*.csv
 *.parquet
 *.jsonl

@@ -26,6 +26,13 @@ Known limitations
   in one place, a jersey number in another, and a platform's collision
   suffix in a third. The digit features carry real signal in aggregate and
   are close to worthless for any individual account.
+* **Archives anonymise, and anonymisation looks like data.** Where a source
+  has replaced an account's handle and display name with a hash of its id --
+  97% of the rows in the published Information Operations archive -- the
+  handle features would measure the digest rather than the account.
+  :func:`has_pseudonymised_identity` detects that and the features are
+  withheld, so their coverage figure reports how much of the corpus could
+  actually be read.
 * **Young accounts are mostly just young.** Every platform has a constant
   inflow of genuine new users, and any campaign with a budget buys aged
   accounts precisely to defeat this feature.
@@ -56,6 +63,7 @@ __all__ = [
     "available_profile_fields",
     "digit_ratio",
     "handle_shape",
+    "has_pseudonymised_identity",
     "profile_completeness",
 ]
 
@@ -112,6 +120,28 @@ def handle_shape(handle: str) -> HandleShape:
         trailing_digits=trailing_digits(handle),
         entropy=character_entropy(handle.casefold()),
     )
+
+
+def has_pseudonymised_identity(account: Account) -> bool:
+    """Whether the source replaced this account's identity with its id.
+
+    Archives anonymise. The published Information Operations archive rewrites
+    ``userid``, ``user_display_name`` and ``user_screen_name`` to one hash for
+    every account below a follower threshold -- 97% of its rows -- so the
+    handle it ships is a base64 digest, not a name.
+
+    Computing handle shape over that measures the anonymisation: a digest has
+    the digit ratio and the character entropy of a digest, and the resulting
+    distribution says nothing whatever about how the accounts were named. The
+    features are therefore withheld rather than computed, which is the same
+    distinction the rest of the library keeps between "measured" and "could
+    not measure".
+
+    The test is deliberately narrow: a field that *equals the account id* is
+    the identifier repeated, not a value. That is true whether the id is a
+    hash, a number or anything else.
+    """
+    return account.account_id in {account.handle, account.display_name}
 
 
 def profile_completeness(
@@ -375,7 +405,12 @@ class AccountExtractor:
                 if rate is not None:
                     frame.loc[row, "acct_posts_per_day"] = rate
 
-            if account.handle and len(account.handle) >= self.config.min_handle_length:
+            measurable_handle = (
+                account.handle
+                and len(account.handle) >= self.config.min_handle_length
+                and not has_pseudonymised_identity(account)
+            )
+            if measurable_handle and account.handle:
                 shape = handle_shape(account.handle)
                 frame.loc[row, "acct_handle_digit_ratio"] = shape.digit_ratio
                 frame.loc[row, "acct_handle_trailing_digits"] = float(shape.trailing_digits)
@@ -390,7 +425,14 @@ class AccountExtractor:
             if reach is not None:
                 frame.loc[row, "acct_followback_ratio"] = reach
 
-            completeness = profile_completeness(account, fields, count_avatar=count_avatar)
+            # A display name that is really the account's own hash is not a
+            # filled-in field, so it must not count towards completeness.
+            countable = (
+                tuple(name for name in fields if name != "display_name")
+                if has_pseudonymised_identity(account)
+                else fields
+            )
+            completeness = profile_completeness(account, countable, count_avatar=count_avatar)
             if completeness is not None:
                 frame.loc[row, "acct_profile_completeness"] = completeness
 
