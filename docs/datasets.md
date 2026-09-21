@@ -50,6 +50,53 @@ Four things it turns up, which the loaders now handle explicitly:
 | One row repeats the header | The consolidated file was built by concatenating per-takedown exports without stripping their headers. |
 | 97% of handles are a hash | The archive anonymises every account below its follower threshold by rewriting `userid`, `user_display_name` and `user_screen_name` to one digest. |
 
+### Getting the tweets without downloading 113 GB
+
+`ioa_tweets.csv` is 113.72 GB, and `archive.org` answers `Accept-Ranges: bytes`,
+so a slice can be pulled directly over HTTP.
+
+**A prefix is not a random sample.** The file is a concatenation of per-takedown
+exports, so it is grouped by campaign. Probing it at intervals:
+
+| offset | what is there |
+| ---: | --- |
+| 0 GB | Bangladesh |
+| 10 GB | English |
+| 56 GB | Arabic |
+| 70–85 GB | Serbian (Belgrade) |
+| 105 GB | Turkish (İstanbul) |
+| 108 GB | Uganda |
+| **110 GB – end** | **Spanish (Venezuela)** |
+
+Downloading "the first 2 GB" gets Bangladesh. For Spanish-language political
+conversation, the last ~3.7 GB is the part that matters.
+
+A ranged download starts and ends mid-line and carries no header, so all three
+have to be handled:
+
+```bash
+URL=https://archive.org/download/X_Twitter_Information_Operations/ioa_tweets.csv
+
+# the header, from the first line of the file
+curl -sL -r 0-600 "$URL" | head -1 > header.csv
+
+# a 500 MB slice from the Spanish-language region
+curl -L -r 110000000000-110500000000 "$URL" -o slice.raw
+
+# drop the truncated first and last lines, prepend the header
+{ cat header.csv; tail -n +2 slice.raw | head -n -1; } > data/raw/io_tweets_es.csv
+```
+
+Measured: roughly **2,000 posts per MB**, so 500 MB is about a million posts and
+the full Spanish region about 7.7 million. A 20 MB test slice loaded 41,668
+posts with nothing skipped.
+
+Only one declaration is needed — `--assume-timezone 0`, since the archive's
+timestamps carry no offset.
+
+There is also a torrent on the item page, which is the better option for the
+whole file.
+
 **The defect you must report:** this dataset has **one class**. Every account in
 it was removed. A model trained on it plus a control group collected some other
 way learns to tell the two *collections* apart and reports a superb score for
