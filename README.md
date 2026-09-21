@@ -18,9 +18,12 @@ political conversation**. Academic / portfolio project.
 
 ## Status
 
-Runs end to end on unlabelled data: load a corpus, get a report. The supervised
-half — a calibrated ensemble over all four feature families — is waiting on
-labelled training data.
+Runs end to end, and has been trained. Against 37,438 labelled accounts the
+calibrated ensemble reaches **ROC AUC 0.872** with an expected calibration
+error of **0.005** — of the accounts it calls 25% likely, 25% are labelled
+bots, and that holds across every bin. Read it as a floor: that dataset carries
+no posts, so 15 of the 22 features were unmeasurable and the model card says so.
+See [`docs/datasets.md`](docs/datasets.md).
 
 - [x] Internal schema (`Account`, `Post`, `LabelRecord`, `Corpus`)
 - [x] Feature declaration contract (`FeatureSpec`, enforced by tests)
@@ -38,9 +41,9 @@ labelled training data.
       completeness, posting rate, dormancy before the first observed post
 - [x] `report` + CLI — feature distributions with their coverage, pseudonymised
       cluster cards, self-contained HTML and JSON export
-- [x] `ingest.labelled` — Bot Repository annotation files and Twitter
-      Information Operations Archive takedowns, with a coverage report that
-      names the conditions under which a trained model would be untrustworthy
+- [x] `ingest.labelled` — annotation files and Twitter Information Operations
+      Archive takedowns, with a coverage report that names the conditions
+      under which a trained model would be untrustworthy
 - [x] `detect.ensemble` — calibrated gradient boosting over all 22 features,
       SHAP attributions, and a model card that records how it was trained
 - [x] `ingest.inspect` — profile an unknown file before loading it: which
@@ -100,13 +103,22 @@ synthwatch train posts.csv labels.dat \
     --dataset indiana-bot-repository/varol-2017 --card model_card.json
 ```
 
+Real output, against 37,438 labelled accounts:
+
 ```
-trained on 1204 accounts; classes {0: 812, 1: 392}
-  roc_auc 0.883  average_precision 0.791
-  brier 0.112  calibration error 0.038
-  negative: precision 0.88 recall 0.91
-  positive: precision 0.79 recall 0.74
+trained on 37438 accounts; classes {0: 25013, 1: 12425}
+  roc_auc 0.872  average_precision 0.800
+  brier 0.130  calibration error 0.005
+  negative: precision 0.83 recall 0.91
+  positive: precision 0.77 recall 0.64
+  warning: 15 feature(s) were unmeasurable for every labelled account and
+           were dropped. The model answers from fewer signals than the
+           pipeline produces.
 ```
+
+That warning is the honest part: the dataset carries no posts, so every
+temporal and coordination feature was dropped and this is what the profile
+features alone can do.
 
 Four things the model refuses to do:
 
@@ -127,7 +139,7 @@ Four things the model refuses to do:
 ## Labelled data, and what it will not tell you
 
 ```bash
-synthwatch labels posts.csv labels.dat --dataset indiana-bot-repository/varol-2017
+synthwatch labels accounts.json labels.tsv --dataset airt-ml/twitter-human-bots
 ```
 
 ```

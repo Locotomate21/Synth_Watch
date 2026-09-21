@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from synthwatch.detect.account import AccountConfig
 from synthwatch.detect.coordination import detect_coordination
 from synthwatch.ingest import REGISTRY
 from synthwatch.ingest.native import (
@@ -27,7 +28,7 @@ from synthwatch.ingest.native import (
 )
 from synthwatch.models import Post, build_corpus
 from synthwatch.types import Platform, PostKind
-from tests.conftest import make_account, make_post
+from tests.conftest import EPOCH, make_account, make_post
 from tests.detect.fixtures_coordination import coordinated_corpus
 
 POSTS_CSV = """post_id,account_id,created_at,text,kind,hashtags
@@ -539,3 +540,36 @@ class TestStructuralJunk:
             encoding="utf-8",
         )
         assert NativeAdapter().load(path).report.n_posts == 1
+
+
+class TestProvenanceSurvivesTheRoundTrip:
+    def test_the_collection_time_comes_back(self, tmp_path: Path):
+        # Without it there is no reference instant, and every feature measured
+        # against one -- account age, dormancy, lifetime posting rate -- goes
+        # quietly unmeasurable.
+        original = build_corpus(
+            [make_account("a1")],
+            [make_post("p1", "a1")],
+            source="somewhere/specific",
+            collected_at=datetime(2024, 3, 1, 12, 0, tzinfo=UTC),
+        )
+        path = write_corpus(original, tmp_path / "corpus.json")
+        restored = NativeAdapter().load(path).corpus
+        assert restored.collected_at == original.collected_at
+        assert restored.source == "somewhere/specific"
+
+    def test_a_corpus_without_provenance_still_loads(self, tmp_path: Path):
+        path = write_corpus(build_corpus([make_account("a1")], []), tmp_path / "corpus.json")
+        restored = NativeAdapter().load(path).corpus
+        assert restored.collected_at is None
+        assert restored.source == path.name
+
+    def test_the_reference_instant_survives_too(self, tmp_path: Path):
+        original = build_corpus(
+            [make_account("a1", created_days_ago=100)],
+            [],
+            collected_at=EPOCH,
+        )
+        path = write_corpus(original, tmp_path / "corpus.json")
+        restored = NativeAdapter().load(path).corpus
+        assert AccountConfig().reference_for(restored) == EPOCH

@@ -92,21 +92,48 @@ The file also carries **240 duplicate account ids** across its 84,972 rows.
 
 ---
 
-## Labelled: Indiana University Bot Repository
+## Labelled: accounts with a negative class
 
-Annotation files — account id plus a class — from a series of studies, with the
-posts distributed separately or not at all.
+The X archive has only removed accounts. Anything that trains a model needs the
+other side, and that is where most of the historical links have rotted.
 
-- <https://botometer.osome.iu.edu/bot-repository/datasets.html>
-- Some datasets download directly; others link to the original authors and need
-  a request. Expect to email a few researchers.
+### Verified working (September 2026)
+
+**`airt-ml/twitter-human-bots`** on Hugging Face — 37,438 accounts, 12,425 bot
+and 25,013 human, one CSV, no access request.
+
+```bash
+curl -L -o data/raw/twitter_human_bots.csv   https://huggingface.co/datasets/airt-ml/twitter-human-bots/resolve/main/twitter_human_bots_dataset.csv
+```
+
+Its columns map almost entirely onto the schema: `id`, `screen_name`,
+`created_at`, `description`, `followers_count`, `friends_count`,
+`statuses_count`, `verified`, `location`, plus `account_type` as the class.
+Only one declaration is needed — `created_at` carries no offset, and Twitter
+published those in UTC.
+
+### Requires an application
+
+- **TwiBot-22** — <https://github.com/LuoUndergradXJTU/TwiBot-22>. One million
+  accounts with a graph structure. Access by emailing the authors from an
+  institutional address, stating your institution, advisor and use case.
+- **TwiBot-20** — <https://github.com/BunsenFeng/TwiBot-20>. Smaller, same
+  arrangement.
+
+### Gone
+
+**The Indiana University Bot Repository is no longer published.**
+`botometer.osome.iu.edu/bot-repository/datasets.html` now returns a soft 404 —
+the server answers 200 with the site shell and the client renders "page not
+found" — and Botometer itself has been rebuilt to score Bluesky accounts. Any
+guide still pointing there, including earlier versions of this file, is stale.
 
 ```bash
 synthwatch labels corpus.json varol-2017.dat \
     --dataset indiana-bot-repository/varol-2017
 ```
 
-**The defects you must report:**
+**The defects you must report,** whichever source you use:
 
 - **The class vocabulary differs per file** — `bot`/`human` in one,
   `social_spambot_1` in another, `0`/`1` in a third. Numeric files are refused
@@ -160,3 +187,47 @@ hundred gigabytes to find out.
 ```bash
 synthwatch inspect whatever_you_downloaded.csv
 ```
+
+---
+
+## The first model this pipeline trained
+
+Against `airt-ml/twitter-human-bots`, 37,438 accounts, all labels matched:
+
+```
+roc_auc 0.872  average_precision 0.800
+brier 0.130  calibration error 0.005
+negative: precision 0.83 recall 0.91
+positive: precision 0.77 recall 0.64
+```
+
+The calibration is the part worth looking at, because it is what the
+probabilities claim to mean:
+
+| predicted | observed | n |
+| ---: | ---: | ---: |
+| 0.04 | 0.04 | 9,754 |
+| 0.25 | 0.25 | 4,770 |
+| 0.55 | 0.55 | 1,656 |
+| 0.75 | 0.77 | 2,518 |
+| 0.96 | 0.97 | 2,560 |
+
+Of the accounts this model called 25% likely, 25% were labelled bots. That
+holds across all ten bins.
+
+What the model is actually reading, by mean absolute SHAP value:
+
+| feature | importance |
+| --- | ---: |
+| `acct_followback_ratio` | 0.809 |
+| `acct_posts_per_day` | 0.541 |
+| `acct_age_days` | 0.344 |
+| `acct_profile_completeness` | 0.261 |
+| `acct_handle_digit_ratio` | 0.109 |
+| `acct_handle_trailing_digits` | 0.048 |
+| `acct_handle_entropy` | 0.028 |
+
+**Read this as a floor, not a result.** The dataset carries no posts, so 15 of
+the 22 features were unmeasurable and dropped — every temporal and coordination
+signal among them. The model card says so. This is what the profile features
+alone can do, and the question the pipeline was built to answer needs the rest.

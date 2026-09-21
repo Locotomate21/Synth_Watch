@@ -496,13 +496,14 @@ class NativeAdapter:
         post_rows: Iterable[Mapping[str, Any]],
         account_rows: Iterable[Mapping[str, Any]] = (),
         label_rows: Iterable[Mapping[str, Any]] = (),
+        collected_at: datetime | None = None,
     ) -> LoadResult:
         """Map already-read rows onto the schema, counting every failure.
 
         Platform adapters use this rather than reimplementing the mapping, so
         that the drop-rate accounting is the same everywhere.
         """
-        return self._build(source, post_rows, account_rows, label_rows)
+        return self._build(source, post_rows, account_rows, label_rows, collected_at)
 
     # -- readers ---------------------------------------------------------
 
@@ -527,11 +528,17 @@ class NativeAdapter:
         if not isinstance(payload, dict):
             msg = f"{path.name}: expected an object or an array at the top level"
             raise ValueError(msg)
+        # A cached corpus carries its own provenance. Dropping it would leave the
+        # reloaded copy with no collection time, and every feature measured
+        # against it -- account age, dormancy, lifetime posting rate -- silently
+        # unmeasurable.
+        collected = payload.get("collected_at")
         return self._build(
-            path.name,
+            payload.get("source") or path.name,
             payload.get("posts", []),
             payload.get("accounts", []),
             payload.get("labels", []),
+            collected_at=parse_timestamp(collected) if collected else None,
         )
 
     def _read_jsonl(self, path: Path) -> list[Mapping[str, Any]]:
@@ -676,6 +683,7 @@ class NativeAdapter:
         post_rows: Iterable[Mapping[str, Any]],
         account_rows: Iterable[Mapping[str, Any]],
         label_rows: Iterable[Mapping[str, Any]],
+        collected_at: datetime | None = None,
     ) -> LoadResult:
         """Map every row, counting failures instead of losing them."""
         skipped: Counter[str] = Counter()
@@ -690,6 +698,7 @@ class NativeAdapter:
             posts=tuple(posts),
             labels=tuple(labels),
             source=source,
+            collected_at=collected_at,
         )
         if corpus.orphan_post_ids:
             warnings.append(
