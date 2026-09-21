@@ -729,6 +729,16 @@ class NativeAdapter:
             if OVERFLOW_KEY in row:
                 skipped[f"{kind}:ragged_row"] += 1
                 continue
+            if _is_empty_row(row):
+                skipped[f"{kind}:empty_row"] += 1
+                continue
+            if _is_repeated_header(row):
+                # Concatenating per-takedown exports without stripping their
+                # headers leaves one in the middle of the file. Without its own
+                # reason it surfaces as an unreadable timestamp, which sends
+                # whoever reads the report looking in the wrong place.
+                skipped[f"{kind}:repeated_header"] += 1
+                continue
             try:
                 yield build(row)
             except (ValueError, TypeError, KeyError) as error:
@@ -743,6 +753,21 @@ _SKIP_REASONS: Final[Mapping[type[Exception], str]] = {
     CorruptedIdentifierError: "corrupted_identifier",
 }
 """Named reasons for the failures a report should be able to act on."""
+
+
+def _is_empty_row(row: Mapping[str, Any]) -> bool:
+    """Whether a row carries no value at all."""
+    return not any(str(value).strip() for value in row.values() if value is not None)
+
+
+def _is_repeated_header(row: Mapping[str, Any]) -> bool:
+    """Whether every populated cell repeats its own column name."""
+    populated = [
+        (str(key).strip(), str(value).strip())
+        for key, value in row.items()
+        if value is not None and str(value).strip()
+    ]
+    return bool(populated) and all(key == value for key, value in populated)
 
 
 def _skip_reason(error: Exception) -> str:

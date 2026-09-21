@@ -30,13 +30,24 @@ synthwatch inspect ioa_users.csv --kind accounts \
     --alias account_creation_date=created_at --date-order mdy --assume-timezone 0
 ```
 
-Three things it turns up, which the loaders now handle explicitly:
+Measured on the full file — 87,377 account rows, of which **84,972 load and
+2,405 do not**, every one of them explained:
+
+```
+trial load of the sample: 84972 record(s)
+  skipped 2315: account:corrupted_identifier
+  skipped 89: account:empty_row
+  skipped 1: account:repeated_header
+```
+
+Four things it turns up, which the loaders now handle explicitly:
 
 | What | Why it matters |
 | --- | --- |
 | `account_creation_date` reads `7/3/2018` | Either 7 March or 3 July. Refused unless `--date-order` is declared. |
-| Some `userid` values read `1.01421E+18` | A spreadsheet round-trip destroyed an 18-digit id. In a 352-row sample of the real file, 3 rows. They join to nothing and are counted as skipped. |
+| Some `userid` values read `1.01421E+18` | A spreadsheet round-trip destroyed an 18-digit id. **2,315 rows of the real file — 2.6%.** They join to nothing and are counted as skipped. |
 | Timestamps carry no offset | The archive documents them as UTC; `IOArchiveAdapter` declares that once rather than guessing per row. |
+| One row repeats the header | The consolidated file was built by concatenating per-takedown exports without stripping their headers. |
 
 **The defect you must report:** this dataset has **one class**. Every account in
 it was removed. A model trained on it plus a control group collected some other

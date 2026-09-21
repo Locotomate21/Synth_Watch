@@ -503,3 +503,39 @@ class TestRecordSeams:
         rows = [{"post_id": "p1", "account_id": "a1", "created_at": "nope", "text": "x"}]
         report = adapter.from_records("in-memory", rows).report
         assert report.n_skipped == 1
+
+
+class TestStructuralJunk:
+    def test_a_blank_row_gets_its_own_reason(self, tmp_path: Path):
+        path = tmp_path / "posts.csv"
+        path.write_text(
+            "post_id,account_id,created_at,text\np1,a1,2024-03-01T12:00:00Z,hola\n,,,\n",
+            encoding="utf-8",
+        )
+        report = NativeAdapter().load(path).report
+        assert report.n_posts == 1
+        assert report.skip_reasons["post:empty_row"] == 1
+
+    def test_a_header_repeated_inside_the_file_is_recognised(self, tmp_path: Path):
+        # Concatenating per-takedown exports without stripping their headers
+        # leaves one in the body. Real consolidated archives contain these.
+        path = tmp_path / "posts.csv"
+        path.write_text(
+            "post_id,account_id,created_at,text\n"
+            "p1,a1,2024-03-01T12:00:00Z,hola\n"
+            "post_id,account_id,created_at,text\n"
+            "p2,a2,2024-03-01T12:05:00Z,adios\n",
+            encoding="utf-8",
+        )
+        report = NativeAdapter().load(path).report
+        assert report.n_posts == 2
+        assert report.skip_reasons["post:repeated_header"] == 1
+
+    def test_a_row_that_merely_resembles_its_header_is_not_discarded(self, tmp_path: Path):
+        # Only a row where *every* populated cell equals its column name counts.
+        path = tmp_path / "posts.csv"
+        path.write_text(
+            "post_id,account_id,created_at,text\npost_id,a1,2024-03-01T12:00:00Z,hola\n",
+            encoding="utf-8",
+        )
+        assert NativeAdapter().load(path).report.n_posts == 1
