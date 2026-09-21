@@ -14,10 +14,13 @@ dist/
 .coverage
 htmlcov/
 
-# Never commit collected data or exported reports. Datasets land wherever the
-# download put them, so match them by name as well as by directory.
-data/
+# Never commit collected data or exported reports. Corpora describe real
+# accounts and a research repo is not a place to redistribute them. The
+# layout convention in data/README.md is tracked; nothing beside it is.
+data/*
+!data/README.md
 out/
+# Datasets also land wherever the download put them, so match them by name.
 ioa_*.csv
 *_tweets*.csv
 *_users*.csv
