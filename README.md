@@ -21,10 +21,11 @@ political conversation**. Academic / portfolio project.
 Runs end to end on real data, both halves.
 
 **Unsupervised**, on 306,434 posts from the Spanish-language region of X's
-information operations archive: a co-posting graph of 298 accounts and 2,668
-edges, against **0.15 edges** when each account's timeline is shifted
-independently. The largest cluster is 50 accounts at density 0.92 publishing
-near-identical text with a **median lag of zero seconds**, 25,910 times.
+information operations archive: a co-posting graph of 305 accounts and 1,592
+edges, against **0.12 edges** when each account's timeline is shifted
+independently. The clusters publish near-identical text at a **median lag of
+zero seconds** — and every one of them has a daily trough and peak, which is
+what a shift looks like rather than a cron job.
 
 **Supervised**, on 37,438 labelled accounts: **ROC AUC 0.872**, expected
 calibration error **0.005** — of the accounts it calls 25% likely, 25% are
