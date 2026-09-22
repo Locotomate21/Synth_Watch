@@ -94,7 +94,18 @@ class TestSimhash:
         )
         outputs = set()
         for seed in ("0", "1", "12345"):
-            env = {**os.environ, "PYTHONHASHSEED": seed, "PYTHONPATH": "src"}
+            env = {
+                **os.environ,
+                "PYTHONHASHSEED": seed,
+                "PYTHONPATH": "src",
+                # Each child imports numpy, and OpenBLAS reserves a thread pool
+                # per process. Three of those alongside the parent exhausts the
+                # allocator on a loaded machine, and the test then fails for a
+                # reason that has nothing to do with hashing. One thread is
+                # plenty: the child computes a single fingerprint.
+                "OPENBLAS_NUM_THREADS": "1",
+                "OMP_NUM_THREADS": "1",
+            }
             result = subprocess.run(
                 [sys.executable, "-c", script], capture_output=True, text=True, env=env, check=True
             )

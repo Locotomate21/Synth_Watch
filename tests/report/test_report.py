@@ -358,3 +358,28 @@ class TestCli:
         with pytest.raises(SystemExit) as exit_info:
             main(["frobnicate"])
         assert exit_info.value.code != 0
+
+
+class TestWindowSweep:
+    """The window is the most consequential setting, so it must be sweepable."""
+
+    @pytest.fixture
+    def corpus_file(self, tmp_path: Path) -> Path:
+        return write_corpus(coordinated_corpus(), tmp_path / "corpus.json")
+
+    def test_the_sweep_is_reported(self, corpus_file: Path, capsys):
+        assert main(["analyse", str(corpus_file), "--window-sweep", "0.1", "15", "120"]) == 0
+        out = capsys.readouterr().out
+        assert "window sensitivity" in out
+        # A window too narrow to catch the planted 40-second jitter finds nothing.
+        assert "0.1 min  edges       0" in out
+
+    def test_without_the_flag_nothing_is_swept(self, corpus_file: Path, capsys):
+        main(["analyse", str(corpus_file)])
+        assert "window sensitivity" not in capsys.readouterr().out
+
+    def test_the_candidate_budget_is_reachable_from_the_command_line(self, corpus_file: Path):
+        # The safety valve exists precisely so an over-wide window fails fast
+        # rather than running for an hour.
+        with pytest.raises(ValueError, match="candidate budget"):
+            main(["analyse", str(corpus_file), "--max-candidate-pairs", "1"])

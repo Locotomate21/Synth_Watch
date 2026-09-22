@@ -17,7 +17,11 @@ from pathlib import Path
 from synthwatch import __version__
 from synthwatch.detect.account import AccountExtractor
 from synthwatch.detect.base import FeatureRegistry, render_catalogue
-from synthwatch.detect.coordination import CoordinationConfig, CoordinationExtractor
+from synthwatch.detect.coordination import (
+    CoordinationConfig,
+    CoordinationExtractor,
+    window_sensitivity,
+)
 from synthwatch.detect.ensemble import (
     AutomationEnsemble,
     EnsembleConfig,
@@ -45,7 +49,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"synthwatch {__version__}")
     subcommands = parser.add_subparsers(dest="command", required=True)
+    _add_analyse(subcommands)
+    _add_labels(subcommands)
+    _add_train(subcommands)
+    _add_inspect(subcommands)
+    _add_docs(subcommands)
+    return parser
 
+
+def _add_analyse(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Register the ``analyse`` subcommand."""
     analyse = subcommands.add_parser(
         "analyse", help="load a corpus, run the analysis, write a report"
     )
@@ -119,9 +132,33 @@ def _parser() -> argparse.ArgumentParser:
             "withhold them when the report travels further than the corpus does."
         ),
     )
+    analyse.add_argument(
+        "--max-candidate-pairs",
+        type=int,
+        default=5_000_000,
+        help=(
+            "safety valve on the co-posting comparison budget (default: 5000000). "
+            "Exceeding it raises rather than spending an hour on an over-wide window."
+        ),
+    )
+    analyse.add_argument(
+        "--window-sweep",
+        nargs="+",
+        type=float,
+        metavar="MINUTES",
+        help=(
+            "re-run the coordination analysis at each of these windows and report "
+            "how much the result moves. A cluster that exists at only one window "
+            "is not a finding, so publishing this curve beside a cluster count is "
+            "the honest minimum."
+        ),
+    )
     analyse.add_argument("--title", default="SynthWatch analysis", help="report title")
     analyse.add_argument("--strict", action="store_true", help="fail on the first bad row")
 
+
+def _add_labels(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Register the ``labels`` subcommand."""
     labels = subcommands.add_parser(
         "labels", help="check how far an annotation file reaches into a corpus"
     )
@@ -144,6 +181,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     labels.add_argument("--out", type=Path, help="write the labelled corpus here, as native JSON")
 
+
+def _add_train(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Register the ``train`` subcommand."""
     train = subcommands.add_parser("train", help="fit a calibrated model and write its model card")
     train.add_argument("posts", type=Path, help="corpus file")
     train.add_argument("annotations", type=Path, help="annotation file (id + class)")
@@ -177,6 +217,9 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
 
+
+def _add_inspect(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Register the ``inspect`` subcommand."""
     inspect = subcommands.add_parser(
         "inspect", help="profile an unknown file before trying to analyse it"
     )
@@ -208,9 +251,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     inspect.add_argument("--json", type=Path, help="write the profile here, as JSON")
 
+
+def _add_docs(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Register the ``docs`` subcommand."""
     docs = subcommands.add_parser("docs", help="regenerate the feature catalogue")
     docs.add_argument("--out", type=Path, default=Path("docs/features.md"))
-    return parser
 
 
 def _analyse(args: argparse.Namespace) -> int:
@@ -227,11 +272,14 @@ def _analyse(args: argparse.Namespace) -> int:
         if args.accounts
         else adapter.load(args.posts)
     )
+    coordination = CoordinationConfig(
+        window=timedelta(minutes=args.window),
+        min_edge_weight=args.min_edge_weight,
+        max_candidate_pairs=args.max_candidate_pairs,
+    )
     report, features = build_report(
         loaded.corpus,
-        coordination_config=CoordinationConfig(
-            window=timedelta(minutes=args.window), min_edge_weight=args.min_edge_weight
-        ),
+        coordination_config=coordination,
         temporal_config=TemporalConfig(min_posts=args.min_posts),
         ingest_report=loaded.report,
         null_model_permutations=args.permutations,
@@ -260,6 +308,20 @@ def _analyse(args: argparse.Namespace) -> int:
     for warning in report_summary.warnings:
         print(f"  warning: {warning}", file=sys.stderr)
     print(f"found {len(report.cards)} cluster(s) worth reporting")
+    if args.window_sweep:
+        print("window sensitivity:")
+        rows = window_sensitivity(
+            loaded.corpus,
+            [timedelta(minutes=minutes) for minutes in args.window_sweep],
+            coordination,
+        )
+        for row in rows:
+            minutes = float(row["window_seconds"]) / 60  # type: ignore[arg-type]
+            print(
+                f"  {minutes:>8.1f} min  edges {row['n_edges']:>7}"
+                f"  clusters {row['n_clusters']:>4}"
+                f"  accounts {row['n_accounts_in_clusters']:>6}"
+            )
     if args.permutations == 0 and report.cards:
         print(
             "  note: no null model was run, so that count has nothing to be "
