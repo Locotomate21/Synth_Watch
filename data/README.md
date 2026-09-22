@@ -26,6 +26,8 @@ them apart is what makes it safe to clear the cache.
 | `derived/human_bots.json` | The above, normalised. No rows rejected. |
 | `derived/human_bots_labels.tsv` | Its `account_type` column, as an annotation file. |
 | `derived/model_card.json` | The trained model's card: metrics, calibration curve, dropped features, warnings. |
+| `raw/io_tweets_es.csv` | A 500 MB range slice of `ioa_tweets.csv` from 110 GB in — the Spanish-language region. 1,098,942 posts, nothing skipped. See `docs/datasets.md` for the campaign map and the slicing recipe. |
+| `raw/io_tweets_es_400k.csv` | The first 400,000 lines of the above. A million posts needs about 7.5 GB of RAM; this fits. |
 
 ## Rebuilding derived/
 
@@ -38,13 +40,21 @@ Both declarations are required and neither is a default: the archive writes
 `7/3/2018`, which is either March or July, and its timestamps carry no offset.
 The library refuses both rather than guessing.
 
+## Memory
+
+Posts are pydantic records, and they are not small. Measured: **270,000 posts
+occupy about 1.9 GB**, so a million needs roughly 7.5 GB and will be killed on
+a 16 GB machine that is doing anything else. A first run on a few hundred
+thousand posts says everything a larger one would about whether the pipeline
+works; scale after, deliberately.
+
 ## Still needed
 
-`raw/ioa_tweets.csv` (106 GB, same mirror, torrent recommended). Neither
-dataset here carries posts, so 15 of the 22 features are currently
-unmeasurable — every temporal and coordination signal. A few hundred thousand
-rows is enough for a first run.
+Labels that reach the *posts*. `twitter_human_bots.csv` labels accounts but
+carries no posts; `io_tweets_es.csv` carries posts but every account in it was
+removed, so it is single-class. Nothing here yet lets a model train on the
+temporal and coordination features, which is the half of the pipeline the
+account features cannot stand in for.
 
-The negative class is solved: `twitter_human_bots.csv` supplies it. The Indiana
-Bot Repository, which earlier versions of these docs pointed at, is no longer
-published.
+The Indiana Bot Repository, which earlier versions of these docs pointed at, is
+no longer published.
