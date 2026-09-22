@@ -12,6 +12,7 @@ after the table is a limitation nobody reads.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -73,6 +74,10 @@ TEMPLATE = """<!doctype html>
   footer { color:var(--muted); font-size:.8rem; margin-top:3rem; border-top:1px solid var(--line);
            padding-top:1rem; }
   code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; }
+  .spark { display:block; margin:.6rem 0 .2rem; max-width:100%; height:auto; }
+  .spark rect { fill:var(--muted); }
+  .axis { display:flex; justify-content:space-between; color:var(--muted);
+          font-size:.72rem; max-width:216px; }
 </style>
 </head>
 <body>
@@ -137,6 +142,12 @@ TEMPLATE = """<!doctype html>
       <div class="stat"><span class="k">Members with no quiet hours</span><span class="v">{{ card.quiet_window_free_members }}/{{ card.size }}</span></div>
       {% endif %}
     </div>
+    {% if card.hour_histogram %}
+    {{ spark(card.hour_histogram) }}
+    <div class="axis"><span>hour 0</span><span>hour 23</span></div>
+    <p class="lim">When this cluster published, summed across its members, in the
+    hours the source recorded. No timezone is implied.</p>
+    {% endif %}
     <p class="members">{{ card.members|join(" · ") }}</p>
     {% if card.example_post_pairs %}
     <p class="lim">Example co-posts:
@@ -203,6 +214,42 @@ TEMPLATE = """<!doctype html>
 """
 
 
+SPARKLINE_HEIGHT = 34
+SPARKLINE_BAR = 7
+SPARKLINE_GAP = 2
+
+
+def _sparkline(counts: Sequence[int]) -> str:
+    """Render an hour-of-day histogram as inline SVG.
+
+    Inline because the report is a single self-contained file, and a chart that
+    needs a script or a font is a chart that is blank when the document is
+    opened from an email attachment.
+
+    The axis is labelled 0 and 23 rather than with local times: the hours are
+    whatever the source recorded, and naming them would imply a timezone the
+    corpus does not carry.
+    """
+    if not counts:
+        return ""
+    peak = max(counts) or 1
+    width = len(counts) * (SPARKLINE_BAR + SPARKLINE_GAP)
+    bars = []
+    for hour, count in enumerate(counts):
+        height = max(1, round(SPARKLINE_HEIGHT * count / peak))
+        x = hour * (SPARKLINE_BAR + SPARKLINE_GAP)
+        y = SPARKLINE_HEIGHT - height
+        bars.append(
+            f'<rect x="{x}" y="{y}" width="{SPARKLINE_BAR}" height="{height}" rx="1">'
+            f"<title>hour {hour}: {count} posts</title></rect>"
+        )
+    return (
+        f'<svg class="spark" viewBox="0 0 {width} {SPARKLINE_HEIGHT}" '
+        f'width="{width}" height="{SPARKLINE_HEIGHT}" role="img" '
+        f'aria-label="posts per hour of day, peak {peak}">{"".join(bars)}</svg>'
+    )
+
+
 def _format_number(value: float | None) -> str:
     """Render a number for a table cell, distinguishing zero from unknown."""
     if value is None:
@@ -229,12 +276,14 @@ def to_html(report: Report, path: Path | None = None) -> str:
         # Deliberately late: Jinja2 lives in the `report` extra so that loading
         # the analysis core never requires it.
         from jinja2 import Environment, select_autoescape  # noqa: PLC0415
+        from markupsafe import Markup  # noqa: PLC0415
     except ImportError as error:  # pragma: no cover - exercised by the extra being absent
         msg = 'HTML export needs Jinja2. Install the report extra: pip install "synthwatch[report]"'
         raise ImportError(msg) from error
 
     environment = Environment(autoescape=select_autoescape(default_for_string=True))
     environment.globals["fmt"] = _format_number
+    environment.globals["spark"] = lambda counts: Markup(_sparkline(counts))
     payload = report.as_dict()
     rendered = environment.from_string(TEMPLATE).render(
         report=report,

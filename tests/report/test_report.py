@@ -16,8 +16,10 @@ import pytest
 from synthwatch.cli import main
 from synthwatch.detect.account import AccountExtractor
 from synthwatch.detect.coordination import detect_coordination
+from synthwatch.detect.temporal import profile_accounts
 from synthwatch.ingest.native import NativeAdapter, write_corpus
 from synthwatch.report import Pseudonymiser, build_cards, build_report, to_html, to_json
+from synthwatch.report.html import _sparkline
 from synthwatch.report.report import CORPUS_CAVEATS
 from synthwatch.report.summary import summarise_features
 from tests.detect.fixtures_coordination import coordinated_corpus, organic_corpus
@@ -383,3 +385,44 @@ class TestWindowSweep:
         # rather than running for an hour.
         with pytest.raises(ValueError, match="candidate budget"):
             main(["analyse", str(corpus_file), "--max-candidate-pairs", "1"])
+
+
+class TestCircadianSparkline:
+    """A chart in a self-contained report has to be self-contained too."""
+
+    def test_the_card_carries_an_aggregate_histogram(self):
+        corpus = coordinated_corpus()
+        card = build_cards(
+            detect_coordination(corpus).clusters,
+            corpus=corpus,
+            profiles=profile_accounts(corpus),
+        )[0]
+        assert len(card.hour_histogram) == 24
+        assert sum(card.hour_histogram) > 0
+
+    def test_without_profiles_there_is_no_histogram(self):
+        corpus = coordinated_corpus()
+        card = build_cards(detect_coordination(corpus).clusters, corpus=corpus)[0]
+        assert card.hour_histogram == ()
+
+    def test_the_svg_is_inline_and_needs_nothing_external(self):
+        svg = _sparkline([0, 5, 10, 0] * 6)
+        assert svg.startswith("<svg")
+        assert "http" not in svg
+        assert "<script" not in svg
+        assert svg.count("<rect") == 24
+
+    def test_an_empty_histogram_renders_nothing(self):
+        assert _sparkline([]) == ""
+
+    def test_every_bar_stays_visible_even_at_one_post(self):
+        # A bar rounded to zero height would read as "no activity" when the
+        # truth is "one post".
+        svg = _sparkline([1000] + [1] * 23)
+        assert 'height="0"' not in svg
+
+    def test_the_report_embeds_it(self):
+        report, _ = build_report(coordinated_corpus())
+        html = to_html(report)
+        assert "<svg" in html
+        assert "No timezone is implied" in html

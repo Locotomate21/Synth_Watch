@@ -128,6 +128,7 @@ class ClusterCard:
     median_lag_seconds: float
     total_pairs: int
     example_post_pairs: tuple[tuple[str, str], ...]
+    hour_histogram: tuple[int, ...]
     median_account_age_days: float | None
     median_circadian_entropy: float | None
     quiet_window_free_members: int | None
@@ -144,6 +145,7 @@ class ClusterCard:
             "median_lag_seconds": round(self.median_lag_seconds, 1),
             "total_pairs": self.total_pairs,
             "example_post_pairs": [list(pair) for pair in self.example_post_pairs],
+            "hour_histogram": list(self.hour_histogram),
             "median_account_age_days": _round(self.median_account_age_days),
             "median_circadian_entropy": _round(self.median_circadian_entropy),
             "quiet_window_free_members": self.quiet_window_free_members,
@@ -157,6 +159,8 @@ CLUSTER_CAVEAT = (
     "message guides, fandoms, syndicated wire copy and ordinary scheduling tools "
     "produce the same pattern. Treat this as a question to investigate."
 )
+
+HOURS_IN_DAY = 24
 
 QUIET_WINDOW_THRESHOLD = 0.15
 """Above this share of posts in its quietest six hours, an account has no night."""
@@ -204,6 +208,7 @@ def build_cards(
                 median_lag_seconds=cluster.median_lag_seconds,
                 total_pairs=cluster.total_pairs,
                 example_post_pairs=cluster.examples if include_examples else (),
+                hour_histogram=_cluster_hours(profiles, cluster.account_ids),
                 median_account_age_days=_cluster_median(
                     features, cluster.account_ids, "acct_age_days"
                 ),
@@ -215,6 +220,26 @@ def build_cards(
             )
         )
     return cards
+
+
+def _cluster_hours(
+    profiles: dict[AccountId, TemporalProfile] | None, account_ids: Sequence[AccountId]
+) -> tuple[int, ...]:
+    """Posts per hour of the day, summed across a cluster's members.
+
+    Aggregate by construction: it describes when the group published, and no
+    member's own rhythm can be read out of it.
+    """
+    if profiles is None:
+        return ()
+    totals = [0] * HOURS_IN_DAY
+    for account_id in account_ids:
+        profile = profiles.get(account_id)
+        if profile is None:
+            continue
+        for hour, count in enumerate(profile.hour_histogram):
+            totals[hour] += count
+    return tuple(totals) if any(totals) else ()
 
 
 def _cluster_median(
