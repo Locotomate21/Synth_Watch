@@ -176,8 +176,8 @@ found" — and Botometer itself has been rebuilt to score Bluesky accounts. Any
 guide still pointing there, including earlier versions of this file, is stale.
 
 ```bash
-synthwatch labels corpus.json varol-2017.dat \
-    --dataset indiana-bot-repository/varol-2017
+synthwatch labels accounts.json labels.tsv \
+    --dataset airt-ml/twitter-human-bots
 ```
 
 **The defects you must report,** whichever source you use:
