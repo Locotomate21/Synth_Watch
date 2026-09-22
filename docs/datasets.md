@@ -287,10 +287,23 @@ alone can do, and the question the pipeline was built to answer needs the rest.
 2010-02-11 to 2015-12-13, at the default 15-minute window.
 
 ```
-graph        : 298 accounts, 2,668 edges
-eligible     : 289,339 posts   matched: 34,677
-null model   : 2,668 observed edges vs 0.15 by chance   p = 0.0476
+graph        : 305 accounts, 1,592 edges
+null model   : 1,592 observed edges vs 0.12 by chance   p = 0.0196 (50 permutations)
 ```
+
+### The first run of this was wrong, and wrong in the flattering direction
+
+Read with the native adapter, the same corpus produced **2,668 edges**. Read
+with `--adapter io-archive`, it produces 1,592.
+
+The archive encodes the conversational role as an `is_retweet` flag, not as a
+column the schema recognises. Without the adapter that knows this, every post
+loads as an original — and **43.7% of this corpus is retweets**. Verbatim
+resharing is a platform feature, which is why `detect.coordination` excludes it
+by default; counting it inflated the graph by two thirds.
+
+Nothing failed. The first run reported a larger, more impressive number, and
+reported it with the same confidence.
 
 The null model is the number that matters. Time-shifting each account's
 timeline independently — keeping every account's own rhythm and destroying only
@@ -329,3 +342,35 @@ it.
 None of this says who or why. It says fifty accounts published near-identical
 text in the same minute, tens of thousands of times, and that chance does not
 produce it.
+
+### The accounts have a working day
+
+With the profiles derived, the account features become measurable and the
+cluster cards carry a circadian histogram. Summed across each cluster's
+members, hour 0 to hour 23 in the hours the source recorded:
+
+```
+c000 (52 accounts)  ▄▄▄▃▄▃▂▃▃▃▅▅▅▆██▇▇▆▅▆▅▄▅   peak 1,753
+c001 (15 accounts)  ▅▄▃▃▃▃▂▄▄▅▆▆▆▇████▇▆▆▆▆▅   peak 3,522
+c002 ( 7 accounts)  ▆▅▅▄▄▄▂▃▄▅▅▆▇████▇▇▆▆▆▆▆   peak 1,332
+```
+
+Every cluster has a trough and a peak. These are not round-the-clock processes:
+they slow down at one end of the day and concentrate at the other, which is
+what a team of people working a shift looks like.
+
+That sits beside a median co-posting lag of zero seconds. Tight enough to be
+dispatched by a machine, shaped like an office — which is exactly why
+`INFO_OPERATION` is not a synonym for `AUTOMATED`, and why the cluster cards
+carry a caveat rather than a verdict.
+
+| account feature | coverage | median |
+| --- | ---: | ---: |
+| `acct_age_days` | 100% | 967 |
+| `acct_followback_ratio` | 100% | 0.48 |
+| `acct_profile_completeness` | 100% | 1.00 |
+| `acct_dormancy_days` | 100% | 98 |
+| `acct_handle_entropy` | 15% | 0.97 |
+
+Profile completeness of 1.00 is worth pausing on: these accounts filled in
+every field. Whatever else they were, they were not thrown together.
