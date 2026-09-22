@@ -59,9 +59,11 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
+from functools import lru_cache
 from statistics import median
 
 import networkx as nx
+import numpy as np
 import pandas as pd
 from networkx.algorithms.community import louvain_communities
 
@@ -145,13 +147,28 @@ def simhash64(text: str, *, shingle_size: int = 5) -> int:
     counts = _shingles(normalise_text(text), shingle_size)
     if not counts:
         return 0
-    vector = [0] * HASH_BITS
-    for shingle, weight in counts.items():
-        digest = hashlib.blake2b(shingle.encode("utf-8"), digest_size=8).digest()
-        value = int.from_bytes(digest, "big")
-        for bit in range(HASH_BITS):
-            vector[bit] += weight if (value >> bit) & 1 else -weight
+
+    # Accumulating 64 bits per shingle in a Python loop costs about 3.6 ms per
+    # post, which is an hour for a million of them. Unpacking the digests into
+    # a (shingles x 64) bit matrix and summing down the columns is the same
+    # arithmetic, done once.
+    digests = b"".join(_digest(shingle) for shingle in counts)
+    bits = np.unpackbits(np.frombuffer(digests, dtype=np.uint8)).reshape(-1, HASH_BITS)
+    weights = np.fromiter(counts.values(), dtype=np.int64, count=len(counts))
+    # unpackbits is most-significant-first; reverse to index by bit position.
+    vector = ((2 * bits.astype(np.int64) - 1) * weights[:, None]).sum(axis=0)[::-1]
     return sum(1 << bit for bit in range(HASH_BITS) if vector[bit] > 0)
+
+
+@lru_cache(maxsize=1 << 20)
+def _digest(shingle: str) -> bytes:
+    """Eight-byte BLAKE2b digest of one shingle.
+
+    Cached because a corpus of near-duplicates reuses the same character
+    n-grams relentlessly -- which is precisely the corpus this module exists
+    to analyse.
+    """
+    return hashlib.blake2b(shingle.encode("utf-8"), digest_size=8).digest()
 
 
 def hamming64(left: int, right: int) -> int:

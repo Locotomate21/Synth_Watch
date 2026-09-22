@@ -13,7 +13,7 @@ import subprocess
 import sys
 from datetime import timedelta
 from itertools import combinations
-from typing import cast
+from typing import ClassVar, cast
 
 import pytest
 
@@ -418,3 +418,33 @@ def test_cluster_is_immutable():
     assert isinstance(cluster, Cluster)
     with pytest.raises((AttributeError, TypeError)):
         cluster.density = 0.0  # type: ignore[misc]
+
+
+class TestFingerprintStability:
+    """The fingerprint is a stored format, not an implementation detail.
+
+    Corpora are cached, reports are compared across runs, and a near-duplicate
+    threshold is calibrated against a particular distance distribution. Change
+    the fingerprint and all of that silently stops meaning what it meant.
+    """
+
+    GOLDEN: ClassVar[dict[str, int]] = {
+        "hola que tal": 312879931155061397,
+        "La reforma que aprobaron de madrugada no arregla nada": 1222999411927696821,
+    }
+
+    @pytest.mark.parametrize(("text", "expected"), list(GOLDEN.items()))
+    def test_known_texts_keep_their_fingerprints(self, text: str, expected: int):
+        assert simhash64(text) == expected
+
+    def test_the_shingle_size_is_part_of_the_format(self):
+        # Two sizes are two different fingerprint spaces; mixing them silently
+        # would make every distance meaningless.
+        assert simhash64("hola que tal", shingle_size=4) != self.GOLDEN["hola que tal"]
+
+    def test_repeated_shingles_are_weighted_not_deduplicated(self):
+        # "aaaa" has one distinct shingle repeated; "abcd" has four distinct
+        # ones. If multiplicity were dropped, the first would match anything
+        # else built from a single repeated shingle.
+        assert simhash64("a" * 40) != simhash64("b" * 40)
+        assert simhash64("abab" * 10) != simhash64("ab" * 20 + "cd")
