@@ -18,12 +18,20 @@ political conversation**. Academic / portfolio project.
 
 ## Status
 
-Runs end to end, and has been trained. Against 37,438 labelled accounts the
-calibrated ensemble reaches **ROC AUC 0.872** with an expected calibration
-error of **0.005** — of the accounts it calls 25% likely, 25% are labelled
-bots, and that holds across every bin. Read it as a floor: that dataset carries
-no posts, so 15 of the 22 features were unmeasurable and the model card says so.
-See [`docs/datasets.md`](docs/datasets.md).
+Runs end to end on real data, both halves.
+
+**Unsupervised**, on 306,434 posts from the Spanish-language region of X's
+information operations archive: a co-posting graph of 298 accounts and 2,668
+edges, against **0.15 edges** when each account's timeline is shifted
+independently. The largest cluster is 50 accounts at density 0.92 publishing
+near-identical text with a **median lag of zero seconds**, 25,910 times.
+
+**Supervised**, on 37,438 labelled accounts: **ROC AUC 0.872**, expected
+calibration error **0.005** — of the accounts it calls 25% likely, 25% are
+labelled bots, and that holds across every bin.
+
+Both numbers come with their limits attached, and both are in
+[`docs/datasets.md`](docs/datasets.md) with the parameters that produced them.
 
 - [x] Internal schema (`Account`, `Post`, `LabelRecord`, `Corpus`)
 - [x] Feature declaration contract (`FeatureSpec`, enforced by tests)
@@ -99,8 +107,8 @@ is wrong with each source.
 ## Training a model
 
 ```bash
-synthwatch train posts.csv labels.dat \
-    --dataset indiana-bot-repository/varol-2017 --card model_card.json
+synthwatch train accounts.json labels.tsv \
+    --dataset airt-ml/twitter-human-bots --card model_card.json
 ```
 
 Real output, against 37,438 labelled accounts:
@@ -143,11 +151,14 @@ synthwatch labels accounts.json labels.tsv --dataset airt-ml/twitter-human-bots
 ```
 
 ```
-412 of 1500 labels matched an account (27%); 88 accounts unlabelled
-  automated: 190
-  organic: 222
-  warning: only 412 of 1500 labels matched an account in this corpus...
+37438 of 37438 labels matched an account (100%); 0 accounts unlabelled
+  automated: 12425
+  organic: 25013
 ```
+
+A match rate below 50% raises a warning of its own: annotation files reference
+accounts that have since been deleted, and the survivors are not a random
+sample of the original set.
 
 The loaders refuse to guess in two places that would otherwise be invisible.
 A numeric annotation file (`0`/`1`) is rejected unless the caller declares which
