@@ -278,3 +278,54 @@ What the model is actually reading, by mean absolute SHAP value:
 the 22 features were unmeasurable and dropped — every temporal and coordination
 signal among them. The model card says so. This is what the profile features
 alone can do, and the question the pipeline was built to answer needs the rest.
+
+---
+
+## The first coordination analysis this pipeline ran
+
+306,434 posts from the Spanish-language region of the archive, spanning
+2010-02-11 to 2015-12-13, at the default 15-minute window.
+
+```
+graph        : 298 accounts, 2,668 edges
+eligible     : 289,339 posts   matched: 34,677
+null model   : 2,668 observed edges vs 0.15 by chance   p = 0.0476
+```
+
+The null model is the number that matters. Time-shifting each account's
+timeline independently — keeping every account's own rhythm and destroying only
+the alignment *between* them — leaves an average of **0.15 edges**. The observed
+graph has 2,668. The p-value sits at 1/21 because that is the floor with 20
+permutations, not because the evidence is marginal.
+
+| cluster | accounts | density | mean similarity | median lag | co-posts |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| c000 | 50 | 0.92 | 0.998 | 0 s | 25,910 |
+| c001 | 42 | 0.07 | 0.992 | 180 s | 706 |
+| c002 | 32 | 0.49 | 0.974 | 0 s | 15,703 |
+| c003 | 10 | 1.00 | 0.997 | 0 s | 753 |
+| c004 | 3 | 1.00 | 1.000 | 0 s | 709 |
+
+### What the window sweep said, and why it was the opposite of the worry
+
+`detect.coordination` warns that the window is the finding — that widening it
+from 5 to 60 minutes can turn a null result into a dense graph. Swept across a
+240-fold range:
+
+| window | edges | clusters | accounts in clusters |
+| ---: | ---: | ---: | ---: |
+| 1 min | 2,515 | 8 | 117 |
+| 5 min | 2,594 | 8 | 129 |
+| 15 min | 2,668 | 5 | 137 |
+| 60 min | 2,779 | 6 | 149 |
+| 240 min | 2,900 | 5 | 156 |
+
+Going from one minute to four hours adds 15% more edges. Almost every pair is
+**already inside the first minute**, which is what a median lag of 0 seconds
+means at this file's minute-resolution timestamps. The result does not depend
+on the parameter, and the sweep is what establishes that rather than asserting
+it.
+
+None of this says who or why. It says fifty accounts published near-identical
+text in the same minute, tens of thousands of times, and that chance does not
+produce it.

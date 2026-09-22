@@ -29,7 +29,7 @@ from synthwatch.detect.ensemble import (
 )
 from synthwatch.detect.temporal import TemporalConfig, TemporalExtractor
 from synthwatch.ingest.inspect import inspect_file, render_profile
-from synthwatch.ingest.labelled import attach_labels, read_label_table
+from synthwatch.ingest.labelled import IOArchiveAdapter, attach_labels, read_label_table
 from synthwatch.ingest.native import NativeAdapter, timezone_of, write_corpus
 from synthwatch.report.html import to_html
 from synthwatch.report.report import build_report, to_json
@@ -64,6 +64,16 @@ def _add_analyse(subcommands: argparse._SubParsersAction[argparse.ArgumentParser
     )
     analyse.add_argument("posts", type=Path, help="posts file (.csv, .tsv, .json, .jsonl)")
     analyse.add_argument("--accounts", type=Path, help="account metadata file")
+    analyse.add_argument(
+        "--adapter",
+        choices=["native", "io-archive"],
+        default="native",
+        help=(
+            "io-archive reads a Twitter Information Operations export, which "
+            "repeats every profile column on each tweet row: without it the "
+            "accounts are never built and every profile feature is empty."
+        ),
+    )
     analyse.add_argument("--html", type=Path, help="write an HTML report here")
     analyse.add_argument("--json", type=Path, help="write a JSON report here")
     analyse.add_argument(
@@ -260,18 +270,22 @@ def _add_docs(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 def _analyse(args: argparse.Namespace) -> int:
     """Run the pipeline and write whatever outputs were asked for."""
-    adapter = NativeAdapter(
-        platform=Platform(args.platform),
-        assume_timezone=timezone_of(args.assume_timezone)
-        if args.assume_timezone is not None
-        else None,
-        strict=args.strict,
-    )
-    loaded = (
-        adapter.load_tables(args.posts, args.accounts)
-        if args.accounts
-        else adapter.load(args.posts)
-    )
+    if args.adapter == "io-archive":
+        archive = IOArchiveAdapter(dataset=args.title, strict=args.strict)
+        loaded = archive.load_takedown(args.posts, args.accounts)
+    else:
+        adapter = NativeAdapter(
+            platform=Platform(args.platform),
+            assume_timezone=timezone_of(args.assume_timezone)
+            if args.assume_timezone is not None
+            else None,
+            strict=args.strict,
+        )
+        loaded = (
+            adapter.load_tables(args.posts, args.accounts)
+            if args.accounts
+            else adapter.load(args.posts)
+        )
     coordination = CoordinationConfig(
         window=timedelta(minutes=args.window),
         min_edge_weight=args.min_edge_weight,

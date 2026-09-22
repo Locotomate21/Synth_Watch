@@ -8,6 +8,7 @@ a test.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -383,14 +384,15 @@ REAL_TWEETS = (
 )
 
 
+@pytest.fixture
+def real_tweets(tmp_path: Path) -> Path:
+    path = tmp_path / "ioa_tweets.csv"
+    path.write_text(REAL_TWEETS, encoding="utf-8")
+    return path
+
+
 class TestRealArchiveShape:
     """Against the actual column layout of the published archive."""
-
-    @pytest.fixture
-    def real_tweets(self, tmp_path: Path) -> Path:
-        path = tmp_path / "ioa_tweets.csv"
-        path.write_text(REAL_TWEETS, encoding="utf-8")
-        return path
 
     def test_profiles_are_derived_when_no_users_file_is_given(self, real_tweets: Path):
         # The consolidated file repeats every profile column on each tweet row.
@@ -422,3 +424,42 @@ class TestRealArchiveShape:
         corpus = IOArchiveAdapter(dataset="d").load(real_tweets).corpus
         assert len(corpus.labels) == 2
         assert {r.label for r in corpus.labels} == {Label.INFO_OPERATION}
+
+
+class TestAnalyseWithTheArchiveAdapter:
+    """Without it, an archive export loads as posts with no accounts at all."""
+
+    def test_the_default_adapter_builds_no_accounts(self, real_tweets: Path, tmp_path: Path):
+        out = tmp_path / "native.json"
+        main(["analyse", str(real_tweets), "--assume-timezone", "0", "--json", str(out)])
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["corpus"]["n_accounts"] == 0
+        assert payload["corpus"]["orphan_posts"] == 2
+
+    def test_the_archive_adapter_derives_them_from_the_tweet_rows(
+        self, real_tweets: Path, tmp_path: Path
+    ):
+        out = tmp_path / "archive.json"
+        main(["analyse", str(real_tweets), "--adapter", "io-archive", "--json", str(out)])
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["corpus"]["n_accounts"] == 2
+        assert payload["corpus"]["orphan_posts"] == 0
+
+    def test_the_profile_features_then_have_something_to_measure(
+        self, real_tweets: Path, tmp_path: Path
+    ):
+        out = tmp_path / "features.csv"
+        main(
+            [
+                "analyse",
+                str(real_tweets),
+                "--adapter",
+                "io-archive",
+                "--features",
+                str(out),
+            ]
+        )
+        body = out.read_text(encoding="utf-8")
+        assert "acct_followback_ratio" in body
+        # Two real rows, not an empty frame.
+        assert len(body.strip().splitlines()) == 3
